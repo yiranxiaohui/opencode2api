@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { KeySummary } from '../api/types'
-import { BoltIcon, EditIcon, SearchIcon, StarIcon, TrashIcon } from './icons'
+import { BoltIcon, EditIcon, PowerIcon, SearchIcon, StarIcon, TrashIcon } from './icons'
 
 interface Props {
   keys: KeySummary[]
@@ -10,9 +10,10 @@ interface Props {
   onEdit: (k: KeySummary) => void
   onDelete: (k: KeySummary) => void
   onSetDefault: (id: string) => void
+  onSetEnabled: (id: string, enabled: boolean) => void
 }
 
-export default function KeyList({ keys, selectedId, onOpen, onTest, onEdit, onDelete, onSetDefault }: Props) {
+export default function KeyList({ keys, selectedId, onOpen, onTest, onEdit, onDelete, onSetDefault, onSetEnabled }: Props) {
   const [query, setQuery] = useState('')
   const [activeTag, setActiveTag] = useState<string | null>(null)
 
@@ -74,16 +75,17 @@ export default function KeyList({ keys, selectedId, onOpen, onTest, onEdit, onDe
         {filtered.map((k) => (
           <div
             key={k.id}
-            className={`key-row ${selectedId === k.id ? 'selected' : ''}`}
+            className={`key-row ${selectedId === k.id ? 'selected' : ''} ${!k.is_enabled ? 'disabled' : ''}`}
             tabIndex={0}
             role="button"
             onClick={() => onOpen(k)}
             onKeyDown={(e) => e.key === 'Enter' && onOpen(k)}
           >
-            <span className="led ok" title="已连通" />
+            <span className={`led ${k.is_enabled ? 'ok' : ''}`} title={k.is_enabled ? '已启用' : '已禁用'} />
             <div className="key-name">
               <span className="nm">{k.name}</span>
               {k.is_default && <span className="default-badge">默认</span>}
+              {!k.is_enabled && <span className="disabled-badge">已禁用</span>}
               {k.proxy_name && <span className="proxy-badge">🌐 {k.proxy_name}</span>}
             </div>
             <div className="key-url">OpenCode 官方账号</div>
@@ -100,11 +102,19 @@ export default function KeyList({ keys, selectedId, onOpen, onTest, onEdit, onDe
               <button className="btn btn-sm" title="连通性测试" onClick={() => onTest(k)}>
                 <BoltIcon size={13} />
               </button>
-              {!k.is_default && (
+              {k.is_enabled && !k.is_default && (
                 <button className="btn btn-sm" title="设为默认" onClick={() => onSetDefault(k.id)}>
                   <StarIcon size={13} />
                 </button>
               )}
+              <button
+                className={`btn btn-sm ${k.is_enabled ? '' : 'btn-enable'}`}
+                title={k.is_enabled ? '禁用账号' : '启用账号'}
+                aria-label={k.is_enabled ? `禁用账号 ${k.name}` : `启用账号 ${k.name}`}
+                onClick={() => onSetEnabled(k.id, !k.is_enabled)}
+              >
+                <PowerIcon size={13} />
+              </button>
               <button className="btn btn-sm" title="编辑" onClick={() => onEdit(k)}>
                 <EditIcon size={13} />
               </button>

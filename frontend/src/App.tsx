@@ -34,7 +34,7 @@ export default function App() {
   const [editingProxy, setEditingProxy] = useState<ProxyRecord | null>(null)
   const [pendingProxyDelete, setPendingProxyDelete] = useState<ProxyRecord | null>(null)
 
-  const { query, createKey, updateKey, deleteKey, setDefault, testKey, importItems } = useKeys(
+  const { query, createKey, updateKey, deleteKey, setDefault, setEnabled, testKey, importItems } = useKeys(
     session.phase === 'unlocked',
   )
   const { query: proxiesQuery, createProxy, updateProxy, deleteProxy } = useProxies(
@@ -109,7 +109,7 @@ export default function App() {
   }
 
   const renderTab = () => {
-    if (tab === 'chat') return <Chat keys={keys} />
+    if (tab === 'chat') return <Chat keys={keys.filter((key) => key.is_enabled)} />
     if (tab === 'logs') return <Logs keys={keys} clientKeys={clientKeys} />
     if (tab === 'client-keys') return <ClientKeys onKeysChange={setClientKeys} />
     if (tab === 'settings') return <Settings />
@@ -173,6 +173,7 @@ export default function App() {
           }}
           onDelete={setPendingDelete}
           onSetDefault={(id) => setDefault.mutate(id)}
+          onSetEnabled={(id, enabled) => setEnabled.mutate({ id, enabled })}
         />
       </>
     )
@@ -269,6 +270,10 @@ export default function App() {
           onDelete={setPendingDelete}
           onSetDefault={(id) => {
             setDefault.mutate(id)
+            setDetail(null)
+          }}
+          onSetEnabled={(id, enabled) => {
+            setEnabled.mutate({ id, enabled })
             setDetail(null)
           }}
         />

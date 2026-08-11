@@ -3,7 +3,7 @@ import { keysApi } from '../api/keys'
 import type { KeySummary, TestResult } from '../api/types'
 import { toast } from '../lib/toast'
 import CopyButton from './CopyButton'
-import { BoltIcon, CheckIcon, EditIcon, EyeIcon, EyeOffIcon, RefreshIcon, StarIcon, TrashIcon, XIcon } from './icons'
+import { BoltIcon, CheckIcon, EditIcon, EyeIcon, EyeOffIcon, PowerIcon, RefreshIcon, StarIcon, TrashIcon, XIcon } from './icons'
 
 interface Props {
   summary: KeySummary
@@ -11,9 +11,10 @@ interface Props {
   onEdit: (s: KeySummary) => void
   onDelete: (s: KeySummary) => void
   onSetDefault: (id: string) => void
+  onSetEnabled: (id: string, enabled: boolean) => void
 }
 
-export default function KeyDetail({ summary, onClose, onEdit, onDelete, onSetDefault }: Props) {
+export default function KeyDetail({ summary, onClose, onEdit, onDelete, onSetDefault, onSetEnabled }: Props) {
   const [record, setRecord] = useState<(typeof summary) & { api_key?: string; model_cache?: unknown[] }>(summary)
   const [revealed, setRevealed] = useState(false)
   const [testing, setTesting] = useState(false)
@@ -63,6 +64,7 @@ export default function KeyDetail({ summary, onClose, onEdit, onDelete, onSetDef
         <div className="drawer-head">
           <h2>{summary.name}</h2>
           {summary.is_default && <span className="default-badge">默认账号</span>}
+          {!summary.is_enabled && <span className="disabled-badge">已禁用</span>}
           <button className="btn btn-ghost btn-sm" onClick={onClose} aria-label="关闭">
             <XIcon size={16} />
           </button>
@@ -160,11 +162,14 @@ export default function KeyDetail({ summary, onClose, onEdit, onDelete, onSetDef
 
           <div className="section-label">操作</div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {!summary.is_default && (
+            {summary.is_enabled && !summary.is_default && (
               <button className="btn" onClick={() => onSetDefault(summary.id)}>
                 <StarIcon size={13} /> 设为默认
               </button>
             )}
+            <button className={summary.is_enabled ? 'btn' : 'btn btn-enable'} onClick={() => onSetEnabled(summary.id, !summary.is_enabled)}>
+              <PowerIcon size={13} /> {summary.is_enabled ? '禁用账号' : '启用账号'}
+            </button>
             <button className="btn" onClick={() => onEdit(summary)}>
               <EditIcon size={13} /> 编辑
             </button>

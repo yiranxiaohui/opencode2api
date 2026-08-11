@@ -33,6 +33,7 @@ pub async fn export(
             api_key: api_key.to_string(),
             tags: row.tags,
             notes: row.notes,
+            is_enabled: row.is_enabled,
             proxy: row.proxy_name,
         });
     }
@@ -104,6 +105,7 @@ pub async fn import(
             tags: item.tags,
             notes: item.notes,
             is_default: false,
+            is_enabled: item.is_enabled,
             proxy_id,
         };
         if st.db.get_key_by_name(&data.name)?.is_some() {

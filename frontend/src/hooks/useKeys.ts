@@ -47,6 +47,15 @@ export function useKeys(enabled: boolean) {
     },
   })
 
+  const setEnabled = useMutation({
+    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
+      keysApi.setEnabled(id, enabled),
+    onSuccess: (_, { enabled }) => {
+      invalidate()
+      toast(enabled ? '账号已启用' : '账号已禁用', 'ok')
+    },
+  })
+
   const testKey = useMutation({ mutationFn: keysApi.test })
 
   const importItems = useMutation({
@@ -57,5 +66,5 @@ export function useKeys(enabled: boolean) {
     },
   })
 
-  return { query, createKey, updateKey, deleteKey, setDefault, testKey, importItems }
+  return { query, createKey, updateKey, deleteKey, setDefault, setEnabled, testKey, importItems }
 }

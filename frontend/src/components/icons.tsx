@@ -136,6 +136,13 @@ export const BoltIcon = ({ size, style, className }: IconProps) => (
   </svg>
 )
 
+export const PowerIcon = ({ size, style, className }: IconProps) => (
+  <svg {...base({ size, style, className })}>
+    <path d="M12 2v10" />
+    <path d="M6.3 5.7a8 8 0 1 0 11.4 0" />
+  </svg>
+)
+
 export const DownloadIcon = ({ size, style, className }: IconProps) => (
   <svg {...base({ size, style, className })}>
     <path d="M12 3v12m0 0 5-5m-5 5-5-5" />
