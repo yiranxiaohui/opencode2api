@@ -9,7 +9,11 @@ FROM rust:1-bookworm AS backend
 WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY src/ ./src/
-RUN cargo build --locked --release
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,target=/build/target,sharing=locked \
+    cargo build --locked --release \
+    && cp target/release/opencode2api /build/opencode2api
 
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update \
@@ -21,7 +25,7 @@ RUN apt-get update \
     && chown -R opencode2api:opencode2api /app /data
 
 WORKDIR /app
-COPY --from=backend /build/target/release/opencode2api /usr/local/bin/opencode2api
+COPY --from=backend /build/opencode2api /usr/local/bin/opencode2api
 COPY --from=frontend /build/frontend/dist ./frontend/dist
 
 ENV OPENCODE2API_BIND=0.0.0.0:8787 \
