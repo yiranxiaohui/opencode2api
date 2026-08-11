@@ -461,6 +461,46 @@ fn candidates_for_model(
     if matches.is_empty() { rows } else { matches }
 }
 
+/// Substrings that mark an upstream error body as "account quota exhausted".
+/// Matched case-insensitively against OpenAI-style `error.message`/`type`/`code`.
+pub(crate) const QUOTA_KEYWORDS: &[&str] = &[
+    "quota",
+    "insufficient",
+    "balance",
+    "payment",
+    "billing",
+    "credit",
+    "exhausted",
+    "额度",
+    "余额",
+];
+
+/// Classify an upstream non-success response as quota exhaustion. HTTP 402 is a
+/// hard signal; other 4xx bodies are scanned in the OpenAI error fields only.
+/// Conservative by design: plain rate limiting (`rate_limit_exceeded`), missing
+/// models, and 5xx must never trigger failover.
+pub(crate) fn is_quota_error(status: StatusCode, body: &[u8]) -> bool {
+    if status == StatusCode::PAYMENT_REQUIRED {
+        return true;
+    }
+    if !status.is_client_error() {
+        return false;
+    }
+    let Ok(value) = serde_json::from_slice::<Value>(body) else {
+        return false;
+    };
+    let Some(err) = value.get("error") else {
+        return false;
+    };
+    let haystack = ["message", "type", "code"]
+        .into_iter()
+        .filter_map(|key| err.get(key).and_then(Value::as_str))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .to_lowercase();
+    QUOTA_KEYWORDS.iter().any(|keyword| haystack.contains(keyword))
+}
+
 fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     headers.get(name).and_then(|v| v.to_str().ok())
 }
@@ -469,7 +509,7 @@ fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
 mod tests {
     use super::{
         affinity_key, candidates_for_model, credential_candidates, insert_upstream_auth,
-        native_endpoint_for_model, select_sticky_account, should_forward_stream,
+        is_quota_error, native_endpoint_for_model, select_sticky_account, should_forward_stream,
     };
     use crate::db::KeyRow;
     use crate::models::ModelInfo;
@@ -621,6 +661,34 @@ mod tests {
         insert_upstream_auth(&mut chat, "upstream-secret", "chat/completions").unwrap();
         assert_eq!(chat["authorization"], "Bearer upstream-secret");
         assert!(!chat.contains_key("x-api-key"));
+    }
+
+    #[test]
+    fn quota_errors_are_recognized_without_false_positives() {
+        let quota_body =
+            br#"{"error":{"message":"You have exhausted your monthly quota","type":"insufficient_quota","code":null}}"#;
+        // HTTP 402 is a hard signal regardless of body.
+        assert!(is_quota_error(StatusCode::PAYMENT_REQUIRED, b"{}"));
+        // 429 with quota semantics in error fields.
+        assert!(is_quota_error(StatusCode::TOO_MANY_REQUESTS, quota_body));
+        // Chinese-language body.
+        assert!(is_quota_error(
+            StatusCode::BAD_REQUEST,
+            r#"{"error":{"message":"余额不足"}}"#.as_bytes()
+        ));
+        // Plain rate limiting must NOT trigger failover.
+        assert!(!is_quota_error(
+            StatusCode::TOO_MANY_REQUESTS,
+            br#"{"error":{"message":"Rate limit exceeded","type":"rate_limit_exceeded"}}"#
+        ));
+        // Model-not-found / server errors / success must not.
+        assert!(!is_quota_error(
+            StatusCode::NOT_FOUND,
+            br#"{"error":{"message":"model not found"}}"#
+        ));
+        assert!(!is_quota_error(StatusCode::INTERNAL_SERVER_ERROR, quota_body));
+        assert!(!is_quota_error(StatusCode::OK, quota_body));
+        assert!(!is_quota_error(StatusCode::TOO_MANY_REQUESTS, b"not json"));
     }
 }
 
