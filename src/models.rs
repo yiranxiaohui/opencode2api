@@ -81,8 +81,8 @@ pub struct ModelInfo {
 pub struct ExportItem {
     pub name: String,
     /// Accepted when importing old backups, but ignored by the gateway.
-    #[serde(default, skip_serializing)]
-    pub base_url: Option<String>,
+    #[serde(default, rename = "base_url", skip_serializing)]
+    pub _base_url: Option<String>,
     pub api_key: String,
     #[serde(default)]
     pub tags: Vec<String>,

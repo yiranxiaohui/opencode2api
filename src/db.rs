@@ -30,7 +30,8 @@ pub struct KeyData {
 pub struct KeyRow {
     pub id: String,
     pub name: String,
-    pub base_url: String,
+    /// Retained for database compatibility; routing uses the fixed OpenCode URL.
+    pub _base_url: String,
     pub api_key_enc: String,
     pub tags: Vec<String>,
     pub notes: String,
@@ -106,7 +107,7 @@ fn row_to_key(r: &rusqlite::Row) -> rusqlite::Result<KeyRow> {
     Ok(KeyRow {
         id: r.get(0)?,
         name: r.get(1)?,
-        base_url: r.get(2)?,
+        _base_url: r.get(2)?,
         api_key_enc: r.get(3)?,
         tags: serde_json::from_str(&tags_json).unwrap_or_default(),
         notes: r.get(5)?,

@@ -385,7 +385,7 @@ mod tests {
         KeyRow {
             id: name.into(),
             name: name.into(),
-            base_url: String::new(),
+            _base_url: String::new(),
             api_key_enc: String::new(),
             tags: vec![],
             notes: String::new(),

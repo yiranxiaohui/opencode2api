@@ -29,7 +29,7 @@ pub async fn export(
         let api_key = st.decrypt_secret(&row.api_key_enc).await?;
         items.push(ExportItem {
             name: row.name,
-            base_url: None,
+            _base_url: None,
             api_key: api_key.to_string(),
             tags: row.tags,
             notes: row.notes,
