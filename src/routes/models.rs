@@ -28,7 +28,12 @@ async fn models_inner(st: AppState, headers: &HeaderMap) -> Result<Value, ApiErr
             return Err(error);
         }
     };
-    let routes = st.db.list_keys()?;
+    let routes: Vec<_> = st
+        .db
+        .list_keys()?
+        .into_iter()
+        .filter(|route| route.is_enabled)
+        .collect();
     if routes.is_empty() {
         return Err(ApiError::BadRequest("no upstream routes configured".into()));
     }

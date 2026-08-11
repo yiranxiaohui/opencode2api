@@ -10,7 +10,8 @@ use crate::db::KeyData;
 use crate::error::ApiError;
 use crate::middleware::Unlocked;
 use crate::models::{
-    KeyInput, KeyRecord, KeySummary, ModelInfo, OPENCODE_BASE_URL, OkResponse, TestResult, now_secs,
+    KeyEnabledInput, KeyInput, KeyRecord, KeySummary, ModelInfo, OPENCODE_BASE_URL, OkResponse,
+    TestResult, now_secs,
 };
 use crate::state::AppState;
 
@@ -107,6 +108,7 @@ pub async fn create(
             tags: input.tags,
             notes: input.notes,
             is_default: input.is_default,
+            is_enabled: true,
             proxy_id,
         },
         now,
@@ -163,7 +165,8 @@ pub async fn update(
             api_key_enc: enc,
             tags: input.tags,
             notes: input.notes,
-            is_default: input.is_default,
+            is_default: input.is_default && existing.is_enabled,
+            is_enabled: existing.is_enabled,
             proxy_id,
         },
         now_secs(),
@@ -194,9 +197,30 @@ pub async fn set_default(
     _: Unlocked,
     Path(id): Path<String>,
 ) -> Result<Json<OkResponse>, ApiError> {
+    let row = st
+        .db
+        .get_key(&id)?
+        .ok_or_else(|| ApiError::NotFound("key not found".into()))?;
+    if !row.is_enabled {
+        return Err(ApiError::BadRequest(
+            "disabled account cannot be set as default".into(),
+        ));
+    }
     st.db
         .set_default(&id, now_secs())?
         .then(|| Json(OkResponse { ok: true }))
+        .ok_or_else(|| ApiError::NotFound("key not found".into()))
+}
+
+pub async fn set_enabled(
+    State(st): State<AppState>,
+    _: Unlocked,
+    Path(id): Path<String>,
+    Json(input): Json<KeyEnabledInput>,
+) -> Result<Json<OkResponse>, ApiError> {
+    st.db
+        .set_key_enabled(&id, input.enabled, now_secs())?
+        .then_some(Json(OkResponse { ok: true }))
         .ok_or_else(|| ApiError::NotFound("key not found".into()))
 }
 

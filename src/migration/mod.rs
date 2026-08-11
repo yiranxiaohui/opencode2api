@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
   notes TEXT NOT NULL DEFAULT '',
   model_cache TEXT NOT NULL DEFAULT '[]',
   is_default INTEGER NOT NULL DEFAULT 0,
+  is_enabled INTEGER NOT NULL DEFAULT 1,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -264,6 +265,51 @@ mod m20260811_000005_add_client_key_encryption {
     }
 }
 
+mod m20260811_000006_add_account_enabled {
+    use sea_orm_migration::prelude::*;
+    use sea_orm_migration::sea_orm::{DbBackend, Statement};
+
+    pub struct Migration;
+
+    impl MigrationName for Migration {
+        fn name(&self) -> &str {
+            "m20260811_000006_add_account_enabled"
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl MigrationTrait for Migration {
+        async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            let connection = manager.get_connection();
+            let columns = connection
+                .query_all(Statement::from_string(
+                    DbBackend::Sqlite,
+                    "PRAGMA table_info('api_keys')".to_owned(),
+                ))
+                .await?;
+            let has_is_enabled = columns
+                .iter()
+                .any(|row| row.try_get::<String>("", "name").as_deref() == Ok("is_enabled"));
+            if !has_is_enabled {
+                connection
+                    .execute_unprepared(
+                        "ALTER TABLE api_keys ADD COLUMN is_enabled INTEGER NOT NULL DEFAULT 1",
+                    )
+                    .await?;
+            }
+            Ok(())
+        }
+
+        async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            manager
+                .get_connection()
+                .execute_unprepared("ALTER TABLE api_keys DROP COLUMN is_enabled")
+                .await?;
+            Ok(())
+        }
+    }
+}
+
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -275,6 +321,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260811_000003_add_first_token_timing::Migration),
             Box::new(m20260811_000004_add_cache_usage::Migration),
             Box::new(m20260811_000005_add_client_key_encryption::Migration),
+            Box::new(m20260811_000006_add_account_enabled::Migration),
         ]
     }
 }
@@ -337,9 +384,17 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(applied, 5);
+        let has_is_enabled: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('api_keys') WHERE name = 'is_enabled'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(applied, 6);
         assert_eq!(has_proxy_id, 1);
         assert_eq!(has_client_key_enc, 1);
+        assert_eq!(has_is_enabled, 1);
 
         drop(connection);
         std::fs::remove_file(path).unwrap();
@@ -394,9 +449,17 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
+        let is_enabled: i64 = connection
+            .query_row(
+                "SELECT is_enabled FROM api_keys WHERE id = 'existing'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(name, "Existing");
         assert_eq!(has_proxy_id, 1);
         assert_eq!(has_client_key_enc, 1);
+        assert_eq!(is_enabled, 1);
 
         drop(connection);
         std::fs::remove_file(path).unwrap();

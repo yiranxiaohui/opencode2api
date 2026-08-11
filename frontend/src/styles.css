@@ -139,6 +139,8 @@ a { color: var(--accent); }
 .btn-primary:hover { background: #e4b24f; border-color: #e4b24f; }
 .btn-danger { border-color: transparent; background: var(--err-soft); color: var(--err); }
 .btn-danger:hover { border-color: rgba(210, 96, 92, 0.4); background: rgba(210, 96, 92, 0.2); }
+.btn-enable { border-color: rgba(92, 184, 132, 0.35); background: var(--ok-soft); color: var(--ok); }
+.btn-enable:hover { border-color: rgba(92, 184, 132, 0.55); background: rgba(92, 184, 132, 0.2); }
 .btn-ghost { background: none; border-color: transparent; color: var(--muted); }
 .btn-ghost:hover { background: var(--panel); color: var(--text); border-color: transparent; }
 .btn-sm { padding: 4px 9px; font-size: 12px; }
@@ -197,6 +199,8 @@ select.input { appearance: none; }
 .key-row:last-child { border-bottom: none; }
 .key-row:hover { background: var(--panel-2); }
 .key-row.selected { background: var(--accent-soft); }
+.key-row.disabled { opacity: .62; }
+.key-row.disabled:hover { opacity: .78; }
 
 .led { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
 .led.ok { background: var(--ok); box-shadow: 0 0 8px rgba(92,184,132,0.6); }
@@ -210,6 +214,11 @@ select.input { appearance: none; }
   font-size: 10px; font-family: var(--mono); letter-spacing: 0.08em;
   color: var(--accent); border: 1px solid var(--accent-line);
   background: var(--accent-soft); border-radius: 4px; padding: 1px 6px;
+}
+.disabled-badge {
+  flex: none; font-size: 10px; font-family: var(--mono); letter-spacing: .06em;
+  color: var(--faint); border: 1px solid var(--border-strong);
+  background: var(--panel-3); border-radius: 4px; padding: 1px 6px;
 }
 .key-name .proxy-badge {
   flex: none;

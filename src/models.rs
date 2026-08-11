@@ -37,6 +37,7 @@ pub struct KeySummary {
     pub tags: Vec<String>,
     pub notes: String,
     pub is_default: bool,
+    pub is_enabled: bool,
     pub model_count: usize,
     pub created_at: i64,
     pub updated_at: i64,
@@ -53,6 +54,7 @@ impl KeySummary {
             tags: r.tags.clone(),
             notes: r.notes.clone(),
             is_default: r.is_default,
+            is_enabled: r.is_enabled,
             model_count: r.model_cache.len(),
             created_at: r.created_at,
             updated_at: r.updated_at,
@@ -88,9 +90,20 @@ pub struct ExportItem {
     pub tags: Vec<String>,
     #[serde(default)]
     pub notes: String,
+    #[serde(default = "default_true")]
+    pub is_enabled: bool,
     /// Name of the attached proxy (matched by name on import).
     #[serde(default)]
     pub proxy: Option<String>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Debug, Deserialize)]
+pub struct KeyEnabledInput {
+    pub enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

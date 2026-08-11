@@ -373,12 +373,24 @@ pub(crate) async fn resolve_target(
 ) -> Result<crate::db::KeyRow, ApiError> {
     if let Some(id) = header_str(headers, "x-key-id") {
         if let Some(row) = st.db.get_key(id)? {
+            if !row.is_enabled {
+                return Err(ApiError::BadRequest(format!(
+                    "account is disabled: {}",
+                    row.name
+                )));
+            }
             return Ok(row);
         }
         return Err(ApiError::BadRequest(format!("x-key-id not found: {id}")));
     }
     if let Some(name) = header_str(headers, "x-key-name") {
         if let Some(row) = st.db.get_key_by_name(name)? {
+            if !row.is_enabled {
+                return Err(ApiError::BadRequest(format!(
+                    "account is disabled: {}",
+                    row.name
+                )));
+            }
             return Ok(row);
         }
         return Err(ApiError::BadRequest(format!(
@@ -437,6 +449,7 @@ fn candidates_for_model(
     rows: Vec<crate::db::KeyRow>,
     model: Option<&str>,
 ) -> Vec<crate::db::KeyRow> {
+    let rows: Vec<_> = rows.into_iter().filter(|row| row.is_enabled).collect();
     let Some(model) = model.filter(|model| !model.is_empty()) else {
         return rows;
     };
@@ -478,6 +491,7 @@ mod tests {
                 })
                 .collect(),
             is_default: false,
+            is_enabled: true,
             created_at: 0,
             updated_at: 0,
             proxy_id: None,
@@ -522,6 +536,18 @@ mod tests {
         let candidates = candidates_for_model(rows, Some("unknown"));
 
         assert_eq!(candidates.len(), 2);
+    }
+
+    #[test]
+    fn disabled_accounts_are_excluded_from_routing() {
+        let enabled = key("enabled", &["model-a"]);
+        let mut disabled = key("disabled", &["model-a"]);
+        disabled.is_enabled = false;
+
+        let candidates = candidates_for_model(vec![disabled, enabled], Some("model-a"));
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].name, "enabled");
     }
 
     #[test]

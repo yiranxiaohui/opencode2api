@@ -16,6 +16,7 @@ export interface KeySummary {
   tags: string[]
   notes: string
   is_default: boolean
+  is_enabled: boolean
   model_count: number
   created_at: number
   updated_at: number
@@ -51,6 +52,7 @@ export interface ExportItem {
   api_key: string
   tags: string[]
   notes: string
+  is_enabled?: boolean
   proxy?: string | null
 }
 

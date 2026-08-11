@@ -6,13 +6,13 @@ use rusqlite::{Connection, OptionalExtension, params, params_from_iter};
 use crate::error::ApiError;
 use crate::models::{LogStatsGroup, LogStatsTotals, ModelInfo, now_secs};
 
-const COLUMNS: &str = "id, name, base_url, api_key_enc, tags, notes, model_cache, is_default, created_at, updated_at, proxy_id";
+const COLUMNS: &str = "id, name, base_url, api_key_enc, tags, notes, model_cache, is_default, created_at, updated_at, proxy_id, is_enabled";
 
 /// Qualify every `api_keys` column for queries that LEFT JOIN `proxies`
 /// (`id`, `name`, `created_at`, `updated_at` exist in both tables).
 const KEY_SELECT: &str = "api_keys.id, api_keys.name, api_keys.base_url, api_keys.api_key_enc, api_keys.tags, \
      api_keys.notes, api_keys.model_cache, api_keys.is_default, api_keys.created_at, \
-     api_keys.updated_at, api_keys.proxy_id";
+     api_keys.updated_at, api_keys.proxy_id, api_keys.is_enabled";
 
 /// Fields that can be written for a key. `api_key_enc` is the already-encrypted blob.
 #[derive(Debug, Clone)]
@@ -23,6 +23,7 @@ pub struct KeyData {
     pub tags: Vec<String>,
     pub notes: String,
     pub is_default: bool,
+    pub is_enabled: bool,
     pub proxy_id: Option<String>,
 }
 
@@ -37,6 +38,7 @@ pub struct KeyRow {
     pub notes: String,
     pub model_cache: Vec<ModelInfo>,
     pub is_default: bool,
+    pub is_enabled: bool,
     pub created_at: i64,
     pub updated_at: i64,
     pub proxy_id: Option<String>,
@@ -117,7 +119,8 @@ fn row_to_key(r: &rusqlite::Row) -> rusqlite::Result<KeyRow> {
         created_at: r.get(8)?,
         updated_at: r.get(9)?,
         proxy_id: r.get(10)?,
-        proxy_name: r.get(11)?,
+        is_enabled: r.get::<_, i64>(11)? != 0,
+        proxy_name: r.get(12)?,
     })
 }
 
@@ -399,7 +402,7 @@ impl Db {
         }
         tx.execute(
             &format!(
-                "INSERT INTO api_keys ({COLUMNS}) VALUES (?1,?2,?3,?4,?5,?6,'[]',?7,?8,?8,?9)"
+                "INSERT INTO api_keys ({COLUMNS}) VALUES (?1,?2,?3,?4,?5,?6,'[]',?7,?8,?8,?9,?10)"
             ),
             params![
                 id,
@@ -410,7 +413,8 @@ impl Db {
                 data.notes,
                 data.is_default as i64,
                 now,
-                data.proxy_id
+                data.proxy_id,
+                data.is_enabled as i64,
             ],
         )?;
         tx.commit()?;
@@ -439,7 +443,7 @@ impl Db {
         tx.execute(
             &format!(
                 "UPDATE api_keys SET name=?2, base_url=?3, api_key_enc=?4, tags=?5, notes=?6,
-                 is_default=?7, updated_at=?8, proxy_id=?9 WHERE id=?1"
+                 is_default=?7, updated_at=?8, proxy_id=?9, is_enabled=?10 WHERE id=?1"
             ),
             params![
                 id,
@@ -450,7 +454,8 @@ impl Db {
                 data.notes,
                 data.is_default as i64,
                 now,
-                data.proxy_id
+                data.proxy_id,
+                data.is_enabled as i64,
             ],
         )?;
         tx.commit()?;
@@ -467,7 +472,7 @@ impl Db {
         let mut conn = self.0.lock().unwrap();
         let tx = conn.transaction()?;
         let n = tx.execute(
-            "UPDATE api_keys SET base_url=?2, api_key_enc=?3, tags=?4, notes=?5, updated_at=?6, proxy_id=?7
+            "UPDATE api_keys SET base_url=?2, api_key_enc=?3, tags=?4, notes=?5, updated_at=?6, proxy_id=?7, is_enabled=?8
              WHERE name=?1 COLLATE NOCASE",
             params![
                 name,
@@ -476,7 +481,8 @@ impl Db {
                 serde_json::to_string(&data.tags)?,
                 data.notes,
                 now,
-                data.proxy_id
+                data.proxy_id,
+                data.is_enabled as i64
             ],
         )?;
         tx.commit()?;
@@ -493,7 +499,7 @@ impl Db {
         let mut conn = self.0.lock().unwrap();
         let tx = conn.transaction()?;
         let exists: i64 = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM api_keys WHERE id = ?1)",
+            "SELECT EXISTS(SELECT 1 FROM api_keys WHERE id = ?1 AND is_enabled = 1)",
             params![id],
             |r| r.get(0),
         )?;
@@ -507,6 +513,19 @@ impl Db {
         )?;
         tx.commit()?;
         Ok(true)
+    }
+
+    pub fn set_key_enabled(&self, id: &str, enabled: bool, now: i64) -> Result<bool, ApiError> {
+        let conn = self.0.lock().unwrap();
+        let changed = conn.execute(
+            "UPDATE api_keys
+             SET is_enabled = ?2,
+                 is_default = CASE WHEN ?2 = 0 THEN 0 ELSE is_default END,
+                 updated_at = ?3
+             WHERE id = ?1",
+            params![id, enabled as i64, now],
+        )?;
+        Ok(changed > 0)
     }
 
     pub fn set_model_cache(
