@@ -144,7 +144,12 @@ export default function KeyList({ keys, selectedId, onOpen, onTest, onEdit, onDe
               ))}
               {k.tags.length > 3 && <span className="meta-num">+{k.tags.length - 3}</span>}
             </div>
-            <div className="meta-num">{k.model_count > 0 ? `${k.model_count} 模型` : ''}</div>
+            <div
+              className={`meta-num key-model-count ${k.model_count === 0 ? 'unsynced' : ''}`}
+              title={k.model_count > 0 ? `已同步 ${k.model_count} 个模型` : '尚未同步模型；点击右侧连通性测试进行同步'}
+            >
+              {k.model_count > 0 ? `${k.model_count} 模型` : '未同步'}
+            </div>
             <div className="row-actions" onClick={(e) => e.stopPropagation()}>
               <button className="btn btn-sm" title="连通性测试" onClick={() => onTest(k)}>
                 <BoltIcon size={13} />
