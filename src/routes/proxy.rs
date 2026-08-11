@@ -425,21 +425,46 @@ pub(crate) fn affinity_key(headers: &HeaderMap, client_id: &str, model: Option<&
     )
 }
 
-/// Highest-random-weight (Rendezvous) hashing provides deterministic affinity
-/// independent of database ordering and minimizes remapping when accounts are
-/// added to or removed from the eligible model pool.
+/// Rendezvous (highest-random-weight) hash of one account under an affinity key.
+fn rendezvous_hash(affinity: &str, id: &str) -> u64 {
+    let mut hasher = Sha256::new();
+    hasher.update(affinity.as_bytes());
+    hasher.update([0]);
+    hasher.update(id.as_bytes());
+    let digest = hasher.finalize();
+    u64::from_be_bytes(digest[..8].try_into().expect("SHA-256 prefix"))
+}
+
+/// Highest-random-weight hashing provides deterministic affinity independent of
+/// database ordering and minimizes remapping when accounts are added to or
+/// removed from the eligible model pool.
 fn select_sticky_account<'a>(
     candidates: &'a [crate::db::KeyRow],
     affinity: &str,
 ) -> Option<&'a crate::db::KeyRow> {
-    candidates.iter().max_by_key(|row| {
-        let mut hasher = Sha256::new();
-        hasher.update(affinity.as_bytes());
-        hasher.update([0]);
-        hasher.update(row.id.as_bytes());
-        let digest = hasher.finalize();
-        u64::from_be_bytes(digest[..8].try_into().expect("SHA-256 prefix"))
-    })
+    candidates
+        .iter()
+        .max_by_key(|row| rendezvous_hash(affinity, &row.id))
+}
+
+/// Accounts in `candidates` (already enabled + model-matched) that are not in
+/// quota cooldown, ordered by descending rendezvous hash. First = the sticky
+/// winner; the remaining order is the deterministic failover order for the
+/// affinity key. Independent of input order.
+fn ordered_candidates<'a, F>(
+    candidates: &'a [crate::db::KeyRow],
+    affinity: &str,
+    in_cooldown: F,
+) -> Vec<&'a crate::db::KeyRow>
+where
+    F: Fn(&str) -> bool,
+{
+    let mut ordered: Vec<&crate::db::KeyRow> = candidates
+        .iter()
+        .filter(|row| !in_cooldown(&row.id))
+        .collect();
+    ordered.sort_by(|a, b| rendezvous_hash(affinity, &b.id).cmp(&rendezvous_hash(affinity, &a.id)));
+    ordered
 }
 
 /// Prefer accounts whose refreshed model cache advertises the requested model.
@@ -516,7 +541,8 @@ fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
 mod tests {
     use super::{
         affinity_key, candidates_for_model, credential_candidates, insert_upstream_auth,
-        is_quota_error, native_endpoint_for_model, select_sticky_account, should_forward_stream,
+        is_quota_error, native_endpoint_for_model, ordered_candidates, select_sticky_account,
+        should_forward_stream,
     };
     use crate::db::KeyRow;
     use crate::models::ModelInfo;
@@ -696,6 +722,40 @@ mod tests {
         assert!(!is_quota_error(StatusCode::INTERNAL_SERVER_ERROR, quota_body));
         assert!(!is_quota_error(StatusCode::OK, quota_body));
         assert!(!is_quota_error(StatusCode::TOO_MANY_REQUESTS, b"not json"));
+    }
+
+    #[test]
+    fn ordered_candidates_are_deterministic_and_match_sticky_first() {
+        let rows = vec![key("a", &["m"]), key("b", &["m"]), key("c", &["m"])];
+        let affinity = "client:model:session";
+        let no_cooldown = |_: &str| false;
+        let order = ordered_candidates(&rows, affinity, no_cooldown);
+        let ids: Vec<&str> = order.iter().map(|row| row.id.as_str()).collect();
+        assert_eq!(ids.len(), 3);
+        // First choice is exactly the current sticky selector's choice.
+        assert_eq!(
+            select_sticky_account(&rows, affinity).unwrap().id.as_str(),
+            ids[0]
+        );
+        // Order is independent of candidate input order.
+        let reversed: Vec<KeyRow> = rows.iter().rev().cloned().collect();
+        let reversed_ids: Vec<&str> = ordered_candidates(&reversed, affinity, no_cooldown)
+            .into_iter()
+            .map(|row| row.id.as_str())
+            .collect();
+        assert_eq!(ids, reversed_ids);
+    }
+
+    #[test]
+    fn ordered_candidates_skip_accounts_in_cooldown() {
+        let rows = vec![key("a", &["m"]), key("b", &["m"]), key("c", &["m"])];
+        let cool_b = |id: &str| id == "b";
+        let ids: Vec<&str> = ordered_candidates(&rows, "k", cool_b)
+            .into_iter()
+            .map(|row| row.id.as_str())
+            .collect();
+        assert_eq!(ids.len(), 2);
+        assert!(!ids.contains(&"b"));
     }
 }
 
