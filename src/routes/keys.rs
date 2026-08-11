@@ -193,11 +193,13 @@ pub async fn import_cookie(
     let cookie = crate::opencode_account::normalize_cookie(&input.cookie)?;
     let proxy_id = resolve_proxy(&st, input.proxy_id.as_deref()).await?;
     let client = st.client_for_proxy_id(proxy_id.as_deref()).await?;
-    let (workspace_id, api_key) = crate::opencode_account::discover(&client, &cookie).await?;
+    let (workspace_id, api_key, email) =
+        crate::opencode_account::discover(&client, &cookie).await?;
     let mut name = input
         .name
         .filter(|v| !v.trim().is_empty())
         .map(|v| v.trim().to_string())
+        .or(email)
         .unwrap_or_else(|| format!("OpenCode {workspace_id}"));
     if st.db.get_key_by_name(&name)?.is_some() {
         name = format!("{name} {}", &Uuid::new_v4().simple().to_string()[..4]);

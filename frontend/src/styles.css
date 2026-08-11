@@ -235,6 +235,11 @@ select.input { appearance: none; }
 }
 
 .key-url { font-family: var(--mono); font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.key-usage { min-width: 0; display: flex; align-items: center; gap: 9px; }
+.plan-name { color: var(--text); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.usage-pills { display: flex; gap: 4px; min-width: 0; }
+.usage-pills span { font-family: var(--mono); font-size: 10px; color: var(--ok); border: 1px solid rgba(92,184,132,.28); background: var(--ok-soft); border-radius: 4px; padding: 2px 5px; white-space: nowrap; }
+.usage-error { color: var(--err); font-size: 11px; }
 
 .tags { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
 .tag {
@@ -694,7 +699,7 @@ select.input { appearance: none; }
   .nav-item { padding: 7px 10px; }
   .sidebar-foot { margin-top: 0; padding-top: 0; border-top: none; flex-direction: row; margin-left: auto; }
   .key-row { grid-template-columns: 14px minmax(0,1fr) auto; }
-  .key-url { display: none; }
+  .key-url, .key-usage { display: none; }
   .row-actions { opacity: 1; }
   .content { padding: 16px 14px 60px; }
   .client-key-create-form { align-items: stretch; flex-direction: column; }

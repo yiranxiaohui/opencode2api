@@ -1,4 +1,6 @@
 import { useMemo, useState } from 'react'
+import { useQueries } from '@tanstack/react-query'
+import { keysApi } from '../api/keys'
 import type { KeySummary } from '../api/types'
 import { BoltIcon, EditIcon, PowerIcon, SearchIcon, StarIcon, TrashIcon } from './icons'
 
@@ -16,6 +18,15 @@ interface Props {
 export default function KeyList({ keys, selectedId, onOpen, onTest, onEdit, onDelete, onSetDefault, onSetEnabled }: Props) {
   const [query, setQuery] = useState('')
   const [activeTag, setActiveTag] = useState<string | null>(null)
+  const usageQueries = useQueries({ queries: keys.map((key) => ({
+    queryKey: ['account-usage', key.id],
+    queryFn: () => keysApi.usage(key.id),
+    enabled: key.has_cookie && key.is_enabled,
+    staleTime: 60_000,
+    refetchInterval: 5 * 60_000,
+    retry: 1,
+  })) })
+  const usageById = new Map(keys.map((key, index) => [key.id, usageQueries[index]]))
 
   const allTags = useMemo(() => {
     const counts = new Map<string, number>()
@@ -88,7 +99,19 @@ export default function KeyList({ keys, selectedId, onOpen, onTest, onEdit, onDe
               {!k.is_enabled && <span className="disabled-badge">已禁用</span>}
               {k.proxy_name && <span className="proxy-badge">🌐 {k.proxy_name}</span>}
             </div>
-            <div className="key-url">OpenCode 官方账号</div>
+            <div className="key-usage">
+              {!k.has_cookie && <span className="key-url">API Key 账号</span>}
+              {k.has_cookie && usageById.get(k.id)?.isPending && <span className="key-url">正在查询额度…</span>}
+              {k.has_cookie && usageById.get(k.id)?.isError && <span className="usage-error">额度查询失败</span>}
+              {usageById.get(k.id)?.data && <>
+                <span className="plan-name">{usageById.get(k.id)!.data!.plan_name}</span>
+                <div className="usage-pills">
+                  {usageById.get(k.id)!.data!.rolling && <span>滚 {usageById.get(k.id)!.data!.rolling!.remaining_percent.toFixed(0)}%</span>}
+                  {usageById.get(k.id)!.data!.weekly && <span>周 {usageById.get(k.id)!.data!.weekly!.remaining_percent.toFixed(0)}%</span>}
+                  {usageById.get(k.id)!.data!.monthly && <span>月 {usageById.get(k.id)!.data!.monthly!.remaining_percent.toFixed(0)}%</span>}
+                </div>
+              </>}
+            </div>
             <div className="tags">
               {k.tags.slice(0, 3).map((t) => (
                 <span key={t} className="tag">
