@@ -129,10 +129,7 @@ pub(crate) async fn proxy_inner(
             fwd.insert(h, v.clone());
         }
     }
-    let auth = format!("Bearer {}", api_key.as_str())
-        .parse::<axum::http::HeaderValue>()
-        .map_err(|_| ApiError::Internal("failed to build Authorization header".into()))?;
-    fwd.insert(axum::http::header::AUTHORIZATION, auth);
+    insert_upstream_auth(&mut fwd, api_key.as_str(), path)?;
 
     let upstream_client = match st.client_for_key(&row).await {
         Ok(upstream_client) => upstream_client,
@@ -259,6 +256,28 @@ pub(crate) async fn proxy_inner(
 
 fn should_forward_stream(requested: bool, status: StatusCode) -> bool {
     requested && status.is_success()
+}
+
+/// OpenCode's OpenAI-compatible endpoints use Bearer auth, while native
+/// Anthropic Messages clients commonly use X-API-Key. Send both conventions
+/// only for `/messages`; both values come from the selected upstream account,
+/// never from the gateway client's credential.
+fn insert_upstream_auth(
+    headers: &mut HeaderMap,
+    api_key: &str,
+    path: &str,
+) -> Result<(), ApiError> {
+    let bearer = format!("Bearer {api_key}")
+        .parse::<axum::http::HeaderValue>()
+        .map_err(|_| ApiError::Internal("failed to build Authorization header".into()))?;
+    headers.insert(axum::http::header::AUTHORIZATION, bearer);
+    if path == "messages" {
+        let api_key = api_key
+            .parse::<axum::http::HeaderValue>()
+            .map_err(|_| ApiError::Internal("failed to build X-API-Key header".into()))?;
+        headers.insert("x-api-key", api_key);
+    }
+    Ok(())
 }
 
 /// Pull `model` / `stream` out of the request body for the log. Non-JSON
@@ -436,8 +455,8 @@ fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
 #[cfg(test)]
 mod tests {
     use super::{
-        affinity_key, candidates_for_model, credential_candidates, native_endpoint_for_model,
-        select_sticky_account, should_forward_stream,
+        affinity_key, candidates_for_model, credential_candidates, insert_upstream_auth,
+        native_endpoint_for_model, select_sticky_account, should_forward_stream,
     };
     use crate::db::KeyRow;
     use crate::models::ModelInfo;
@@ -560,6 +579,19 @@ mod tests {
             affinity_key(&HeaderMap::new(), "client", Some("model")),
             affinity_key(&HeaderMap::new(), "client", Some("model"))
         );
+    }
+
+    #[test]
+    fn native_messages_sends_both_upstream_auth_conventions() {
+        let mut messages = HeaderMap::new();
+        insert_upstream_auth(&mut messages, "upstream-secret", "messages").unwrap();
+        assert_eq!(messages["authorization"], "Bearer upstream-secret");
+        assert_eq!(messages["x-api-key"], "upstream-secret");
+
+        let mut chat = HeaderMap::new();
+        insert_upstream_auth(&mut chat, "upstream-secret", "chat/completions").unwrap();
+        assert_eq!(chat["authorization"], "Bearer upstream-secret");
+        assert!(!chat.contains_key("x-api-key"));
     }
 }
 
