@@ -162,6 +162,17 @@ jobs:
           pattern: opencode2api-*
           path: artifacts
           merge-multiple: true
-      - env:
+      - name: Create release or upload assets
+        env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" artifacts/* --repo "${{ github.repository }}" --generate-notes --verify-tag
+          REPOSITORY: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG" --repo "$REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" artifacts/* --repo "$REPOSITORY" --clobber
+          else
+            gh release create "$TAG" artifacts/* \
+              --repo "$REPOSITORY" \
+              --generate-notes \
+              --verify-tag
+          fi
