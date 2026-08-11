@@ -39,7 +39,7 @@ pub struct KeyRow {
     pub tags: Vec<String>,
     pub notes: String,
     pub model_cache: Vec<ModelInfo>,
-    pub is_default: bool,
+    pub _is_default: bool,
     pub is_enabled: bool,
     pub created_at: i64,
     pub updated_at: i64,
@@ -119,7 +119,7 @@ fn row_to_key(r: &rusqlite::Row) -> rusqlite::Result<KeyRow> {
         tags: serde_json::from_str(&tags_json).unwrap_or_default(),
         notes: r.get(5)?,
         model_cache: serde_json::from_str(&models_json).unwrap_or_default(),
-        is_default: r.get::<_, i64>(7)? != 0,
+        _is_default: r.get::<_, i64>(7)? != 0,
         created_at: r.get(8)?,
         updated_at: r.get(9)?,
         proxy_id: r.get(10)?,
@@ -358,7 +358,7 @@ impl Db {
         let mut stmt = conn.prepare(&format!(
             "SELECT {KEY_SELECT}, p.name FROM api_keys
              LEFT JOIN proxies p ON p.id = api_keys.proxy_id
-             ORDER BY api_keys.is_default DESC, api_keys.created_at DESC"
+             ORDER BY api_keys.created_at DESC"
         ))?;
         let rows = stmt.query_map([], row_to_key)?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -503,32 +503,12 @@ impl Db {
         Ok(n > 0)
     }
 
-    pub fn set_default(&self, id: &str, now: i64) -> Result<bool, ApiError> {
-        let mut conn = self.0.lock().unwrap();
-        let tx = conn.transaction()?;
-        let exists: i64 = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM api_keys WHERE id = ?1 AND is_enabled = 1)",
-            params![id],
-            |r| r.get(0),
-        )?;
-        if exists == 0 {
-            return Ok(false);
-        }
-        tx.execute("UPDATE api_keys SET is_default = 0", [])?;
-        tx.execute(
-            "UPDATE api_keys SET is_default = 1, updated_at = ?1 WHERE id = ?2",
-            params![now, id],
-        )?;
-        tx.commit()?;
-        Ok(true)
-    }
-
     pub fn set_key_enabled(&self, id: &str, enabled: bool, now: i64) -> Result<bool, ApiError> {
         let conn = self.0.lock().unwrap();
         let changed = conn.execute(
             "UPDATE api_keys
              SET is_enabled = ?2,
-                 is_default = CASE WHEN ?2 = 0 THEN 0 ELSE is_default END,
+                 is_default = 0,
                  updated_at = ?3
              WHERE id = ?1",
             params![id, enabled as i64, now],

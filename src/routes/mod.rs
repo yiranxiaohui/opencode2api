@@ -47,7 +47,6 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/keys/{id}/test", post(keys::test))
         .route("/keys/{id}/usage", get(keys::usage))
-        .route("/keys/{id}/set-default", post(keys::set_default))
         .route("/keys/{id}/set-enabled", post(keys::set_enabled))
         .route("/proxies", get(proxies::list).post(proxies::create))
         .route(

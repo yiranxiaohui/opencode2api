@@ -107,7 +107,7 @@ pub async fn create(
             api_key_enc: enc,
             tags: input.tags,
             notes: input.notes,
-            is_default: input.is_default,
+            is_default: false,
             is_enabled: true,
             proxy_id,
             cookie_enc: None,
@@ -167,7 +167,7 @@ pub async fn update(
             api_key_enc: enc,
             tags: input.tags,
             notes: input.notes,
-            is_default: input.is_default && existing.is_enabled,
+            is_default: false,
             is_enabled: existing.is_enabled,
             proxy_id,
             cookie_enc: existing.cookie_enc.clone(),
@@ -262,26 +262,6 @@ pub async fn delete(
 ) -> Result<Json<OkResponse>, ApiError> {
     st.db
         .delete_key(&id)?
-        .then(|| Json(OkResponse { ok: true }))
-        .ok_or_else(|| ApiError::NotFound("key not found".into()))
-}
-
-pub async fn set_default(
-    State(st): State<AppState>,
-    _: Unlocked,
-    Path(id): Path<String>,
-) -> Result<Json<OkResponse>, ApiError> {
-    let row = st
-        .db
-        .get_key(&id)?
-        .ok_or_else(|| ApiError::NotFound("key not found".into()))?;
-    if !row.is_enabled {
-        return Err(ApiError::BadRequest(
-            "disabled account cannot be set as default".into(),
-        ));
-    }
-    st.db
-        .set_default(&id, now_secs())?
         .then(|| Json(OkResponse { ok: true }))
         .ok_or_else(|| ApiError::NotFound("key not found".into()))
 }

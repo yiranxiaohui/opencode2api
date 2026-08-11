@@ -490,7 +490,7 @@ mod tests {
                     owned_by: String::new(),
                 })
                 .collect(),
-            is_default: false,
+            _is_default: false,
             is_enabled: true,
             created_at: 0,
             updated_at: 0,

@@ -15,7 +15,6 @@ export default function KeyFormModal({ initial, proxies = [], busy, onClose, onS
   const [apiKey, setApiKey] = useState('')
   const [tags, setTags] = useState(initial?.tags.join(', ') ?? '')
   const [notes, setNotes] = useState(initial?.notes ?? '')
-  const [isDefault, setIsDefault] = useState(initial?.is_default ?? false)
   const [proxyId, setProxyId] = useState(initial?.proxy_id ?? '')
   const [err, setErr] = useState('')
 
@@ -32,7 +31,6 @@ export default function KeyFormModal({ initial, proxies = [], busy, onClose, onS
         .map((t) => t.trim())
         .filter(Boolean),
       notes: notes.trim(),
-      is_default: isDefault,
       proxy_id: proxyId || null,
     })
   }
@@ -99,15 +97,6 @@ export default function KeyFormModal({ initial, proxies = [], busy, onClose, onS
                 onChange={(e) => setNotes(e.target.value)}
               />
             </div>
-            <label className="check">
-              <input
-                type="checkbox"
-                checked={isDefault}
-                onChange={(e) => setIsDefault(e.target.checked)}
-              />
-              设为默认账号（作为内置对话的初始选择）
-            </label>
-
             {err && <p className="auth-err" style={{ marginTop: 12 }}>{err}</p>}
           </div>
           <div className="modal-foot">

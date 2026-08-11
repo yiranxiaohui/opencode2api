@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { useQueries } from '@tanstack/react-query'
 import { keysApi } from '../api/keys'
 import type { KeySummary } from '../api/types'
-import { BoltIcon, EditIcon, PowerIcon, SearchIcon, StarIcon, TrashIcon } from './icons'
+import { BoltIcon, EditIcon, PowerIcon, SearchIcon, TrashIcon } from './icons'
 
 interface Props {
   keys: KeySummary[]
@@ -11,11 +11,10 @@ interface Props {
   onTest: (k: KeySummary) => void
   onEdit: (k: KeySummary) => void
   onDelete: (k: KeySummary) => void
-  onSetDefault: (id: string) => void
   onSetEnabled: (id: string, enabled: boolean) => void
 }
 
-export default function KeyList({ keys, selectedId, onOpen, onTest, onEdit, onDelete, onSetDefault, onSetEnabled }: Props) {
+export default function KeyList({ keys, selectedId, onOpen, onTest, onEdit, onDelete, onSetEnabled }: Props) {
   const [query, setQuery] = useState('')
   const [activeTag, setActiveTag] = useState<string | null>(null)
   const usageQueries = useQueries({ queries: keys.map((key) => ({
@@ -95,7 +94,6 @@ export default function KeyList({ keys, selectedId, onOpen, onTest, onEdit, onDe
             <span className={`led ${k.is_enabled ? 'ok' : ''}`} title={k.is_enabled ? '已启用' : '已禁用'} />
             <div className="key-name">
               <span className="nm">{k.name}</span>
-              {k.is_default && <span className="default-badge">默认</span>}
               {!k.is_enabled && <span className="disabled-badge">已禁用</span>}
               {k.proxy_name && <span className="proxy-badge">🌐 {k.proxy_name}</span>}
             </div>
@@ -125,11 +123,6 @@ export default function KeyList({ keys, selectedId, onOpen, onTest, onEdit, onDe
               <button className="btn btn-sm" title="连通性测试" onClick={() => onTest(k)}>
                 <BoltIcon size={13} />
               </button>
-              {k.is_enabled && !k.is_default && (
-                <button className="btn btn-sm" title="设为默认" onClick={() => onSetDefault(k.id)}>
-                  <StarIcon size={13} />
-                </button>
-              )}
               <button
                 className={`btn btn-sm ${k.is_enabled ? '' : 'btn-enable'}`}
                 title={k.is_enabled ? '禁用账号' : '启用账号'}

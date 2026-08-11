@@ -15,7 +15,6 @@ export interface KeySummary {
   base_url: string
   tags: string[]
   notes: string
-  is_default: boolean
   is_enabled: boolean
   model_count: number
   created_at: number
@@ -37,7 +36,6 @@ export interface KeyInput {
   api_key?: string
   tags: string[]
   notes: string
-  is_default: boolean
   proxy_id?: string | null
 }
 

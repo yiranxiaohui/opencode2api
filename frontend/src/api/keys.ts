@@ -31,7 +31,6 @@ export const keysApi = {
   update: (id: string, input: KeyInput) => put<KeyRecord>(`/api/keys/${id}`, input),
   remove: (id: string) => del<{ ok: boolean }>(`/api/keys/${id}`),
   test: (id: string) => post<TestResult>(`/api/keys/${id}/test`),
-  setDefault: (id: string) => post<{ ok: boolean }>(`/api/keys/${id}/set-default`),
   setEnabled: (id: string, enabled: boolean) =>
     post<{ ok: boolean }>(`/api/keys/${id}/set-enabled`, { enabled }),
   exportAll: () => get<ExportPayload>('/api/export'),
