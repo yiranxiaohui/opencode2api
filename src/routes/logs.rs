@@ -148,6 +148,31 @@ pub fn record_failure(
     );
 }
 
+/// Record a rejected gateway request without retaining the presented secret.
+/// There is no client row to reference because authentication did not succeed.
+pub fn record_auth_failure(st: &AppState, method: &str, path: &str, error: &ApiError) {
+    let _ = st.db.insert_request_log(&RequestLogRow {
+        id: Uuid::new_v4().to_string(),
+        created_at: now_secs(),
+        client_key_id: None,
+        client_key_name: "未认证客户端".into(),
+        route_key_id: None,
+        route_key_name: None,
+        method: method.into(),
+        path: path.into(),
+        model: None,
+        stream: false,
+        status: error.status().as_u16() as i64,
+        latency_ms: 0,
+        first_token_ms: None,
+        prompt_tokens: None,
+        completion_tokens: None,
+        cached_tokens: None,
+        cache_creation_tokens: None,
+        error: Some(error.message()),
+    });
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Usage {
     pub prompt: Option<i64>,

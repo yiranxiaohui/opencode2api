@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -23,6 +24,8 @@ pub struct AppState {
     /// path. reqwest requires the proxy to be set at client-build time, so we
     /// build once per URL and reuse. Purged on proxy create/update/delete.
     pub proxy_pool_clients: Arc<Mutex<HashMap<String, Client>>>,
+    /// Monotonic cursor shared by every cloned state for round-robin account routing.
+    pub account_cursor: Arc<AtomicU64>,
     pub web_dist: PathBuf,
 }
 
@@ -49,6 +52,7 @@ impl AppState {
             proxy_client,
             test_client,
             proxy_pool_clients: Arc::new(Mutex::new(HashMap::new())),
+            account_cursor: Arc::new(AtomicU64::new(0)),
             web_dist,
         })
     }

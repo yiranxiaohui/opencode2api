@@ -1,3 +1,4 @@
+use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 use axum::body::Body;
@@ -12,8 +13,8 @@ use crate::middleware::Unlocked;
 use crate::routes::logs::{self, LogInput};
 use crate::state::AppState;
 
-/// Unified OpenAI-compatible gateway: forwards `/v1/*` to the target key.
-/// Target chosen by `X-Key-Id` / `X-Key-Name` headers, else the default key.
+/// Unified OpenAI-compatible gateway: forwards `/v1/*` to a round-robin key.
+/// `X-Key-Id` / `X-Key-Name` remain available as explicit overrides.
 /// SSE (stream: true) is forwarded incrementally via `Body::from_stream`.
 pub async fn proxy(
     State(st): State<AppState>,
@@ -63,7 +64,13 @@ pub(crate) async fn proxy_inner(
     let method_str = method.as_str().to_string();
     let client = match authenticated_client {
         Some(client) => client,
-        None => authenticate_client(&st, headers)?,
+        None => match authenticate_client(&st, headers) {
+            Ok(client) => client,
+            Err(error) => {
+                logs::record_auth_failure(&st, &method_str, path, &error);
+                return Err(error);
+            }
+        },
     };
     // Requests are small JSON bodies; buffer fully before routing so a standard
     // client can be routed by its `model` without custom headers.
@@ -81,7 +88,21 @@ pub(crate) async fn proxy_inner(
             return Err(e);
         }
     };
-    let api_key = st.decrypt_secret(&row.api_key_enc).await?;
+    let api_key = match st.decrypt_secret(&row.api_key_enc).await {
+        Ok(api_key) => api_key,
+        Err(error) => {
+            logs::record_failure(
+                &st,
+                &client,
+                Some(&row),
+                &method_str,
+                path,
+                started.elapsed().as_millis() as i64,
+                &error,
+            );
+            return Err(error);
+        }
+    };
 
     let base = crate::models::OPENCODE_BASE_URL;
     let path = path.trim_matches('/');
@@ -111,7 +132,21 @@ pub(crate) async fn proxy_inner(
         .map_err(|_| ApiError::Internal("failed to build Authorization header".into()))?;
     fwd.insert(axum::http::header::AUTHORIZATION, auth);
 
-    let upstream_client = st.client_for_key(&row).await?;
+    let upstream_client = match st.client_for_key(&row).await {
+        Ok(upstream_client) => upstream_client,
+        Err(error) => {
+            logs::record_failure(
+                &st,
+                &client,
+                Some(&row),
+                &method_str,
+                path,
+                started.elapsed().as_millis() as i64,
+                &error,
+            );
+            return Err(error);
+        }
+    };
     let mut req = upstream_client.request(method, &url).headers(fwd);
     if !body_bytes.is_empty() {
         req = req.body(body_bytes);
@@ -146,7 +181,10 @@ pub(crate) async fn proxy_inner(
         resp_headers.remove(h);
     }
 
-    if stream {
+    // An upstream authentication failure is a regular JSON error even when the
+    // client requested SSE. Buffer all non-success responses so their message
+    // is captured in the request log instead of disappearing into the stream.
+    if should_forward_stream(stream, status) {
         // Streaming: forward each SSE frame as it arrives. Record the call with
         // TTFB latency now; token usage is backfilled when the stream ends.
         let log_id = logs::insert_log(
@@ -215,6 +253,10 @@ pub(crate) async fn proxy_inner(
         },
     );
     Ok((status, resp_headers, Body::from(bytes)).into_response())
+}
+
+fn should_forward_stream(requested: bool, status: StatusCode) -> bool {
+    requested && status.is_success()
 }
 
 /// Pull `model` / `stream` out of the request body for the log. Non-JSON
@@ -300,27 +342,32 @@ pub(crate) async fn resolve_target(
             "x-key-name not found: {name}"
         )));
     }
-    if let Some(row) = st.db.get_default_key()? {
-        return Ok(row);
+    let rows = st.db.all_key_rows()?;
+    let candidates = candidates_for_model(rows, model);
+    if candidates.is_empty() {
+        return Err(ApiError::BadRequest("no account configured".into()));
     }
 
-    let rows = st.db.all_key_rows()?;
-    if let Some(model) = model.filter(|model| !model.is_empty()) {
-        let mut matches = rows
-            .iter()
-            .filter(|row| row.model_cache.iter().any(|item| item.id == model));
-        if let Some(row) = matches.next() {
-            if matches.next().is_none() {
-                return Ok(row.clone());
-            }
-        }
-    }
-    if rows.len() == 1 {
-        return Ok(rows.into_iter().next().expect("one route"));
-    }
-    Err(ApiError::BadRequest(
-        "no target account: set a default account, use a model unique to one account, or pass X-Key-Id / X-Key-Name headers".into(),
-    ))
+    let cursor = st.account_cursor.fetch_add(1, Ordering::Relaxed);
+    Ok(candidates[(cursor % candidates.len() as u64) as usize].clone())
+}
+
+/// Prefer accounts whose refreshed model cache advertises the requested model.
+/// If none do (including empty/stale caches), keep the gateway usable by
+/// balancing across the full pool and let the upstream validate the model.
+fn candidates_for_model(
+    rows: Vec<crate::db::KeyRow>,
+    model: Option<&str>,
+) -> Vec<crate::db::KeyRow> {
+    let Some(model) = model.filter(|model| !model.is_empty()) else {
+        return rows;
+    };
+    let matches: Vec<_> = rows
+        .iter()
+        .filter(|row| row.model_cache.iter().any(|item| item.id == model))
+        .cloned()
+        .collect();
+    if matches.is_empty() { rows } else { matches }
 }
 
 fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
@@ -329,7 +376,33 @@ fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
 
 #[cfg(test)]
 mod tests {
-    use super::native_endpoint_for_model;
+    use super::{candidates_for_model, native_endpoint_for_model, should_forward_stream};
+    use crate::db::KeyRow;
+    use crate::models::ModelInfo;
+    use axum::http::StatusCode;
+
+    fn key(name: &str, models: &[&str]) -> KeyRow {
+        KeyRow {
+            id: name.into(),
+            name: name.into(),
+            base_url: String::new(),
+            api_key_enc: String::new(),
+            tags: vec![],
+            notes: String::new(),
+            model_cache: models
+                .iter()
+                .map(|id| ModelInfo {
+                    id: (*id).into(),
+                    owned_by: String::new(),
+                })
+                .collect(),
+            is_default: false,
+            created_at: 0,
+            updated_at: 0,
+            proxy_id: None,
+            proxy_name: None,
+        }
+    }
 
     #[test]
     fn opencode_zen_models_select_their_native_endpoint() {
@@ -340,6 +413,41 @@ mod tests {
             Some("chat/completions")
         );
         assert_eq!(native_endpoint_for_model("unknown-model"), None);
+    }
+
+    #[test]
+    fn load_balancing_pool_contains_every_account_supporting_the_model() {
+        let rows = vec![
+            key("a", &["shared"]),
+            key("b", &["other"]),
+            key("c", &["shared"]),
+        ];
+
+        let candidates = candidates_for_model(rows, Some("shared"));
+
+        assert_eq!(
+            candidates
+                .iter()
+                .map(|row| row.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["a", "c"]
+        );
+    }
+
+    #[test]
+    fn load_balancing_pool_falls_back_to_all_accounts_for_unknown_model() {
+        let rows = vec![key("a", &[]), key("b", &["known"])];
+
+        let candidates = candidates_for_model(rows, Some("unknown"));
+
+        assert_eq!(candidates.len(), 2);
+    }
+
+    #[test]
+    fn streaming_authentication_errors_are_buffered_for_logging() {
+        assert!(!should_forward_stream(true, StatusCode::UNAUTHORIZED));
+        assert!(!should_forward_stream(true, StatusCode::FORBIDDEN));
+        assert!(should_forward_stream(true, StatusCode::OK));
     }
 }
 

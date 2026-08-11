@@ -105,7 +105,7 @@ export default function KeyFormModal({ initial, proxies = [], busy, onClose, onS
                 checked={isDefault}
                 onChange={(e) => setIsDefault(e.target.checked)}
               />
-              设为默认账号（请求未指定账号时使用）
+              设为默认账号（作为内置对话的初始选择）
             </label>
 
             {err && <p className="auth-err" style={{ marginTop: 12 }}>{err}</p>}

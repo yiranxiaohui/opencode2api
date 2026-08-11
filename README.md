@@ -10,8 +10,7 @@ API Key 使用 **登录密码派生密钥 AES-256-GCM 加密** 后存于 SQLite�
 
 - **账号管理**：增删改查、搜索、标签筛选、设置默认账号
 - **连通性测试**：一键请求 OpenCode 官方 `/models`，显示延迟与模型列表并缓存
-- **统一代理**：`POST /v1/chat/completions` 等，SSE 流式原样透传；目标优先由
-  `X-Key-Id` / `X-Key-Name` 指定，否则使用默认账号、模型唯一匹配或唯一可用账号
+- **统一代理**：`POST /v1/chat/completions` 等，SSE 流式原样透传；默认在支持请求模型的账号池中轮询负载均衡
 - **访问密钥**：为调用代理的客户端自动生成独立 API Key，可随时撤销
 - **代理池**：管理一组 HTTP / HTTPS / SOCKS5 出口转发代理，每个账号可挂一个；网关转发、连通性测试、`/v1/models` 聚合均走该代理
 - **多协议模型路由**：同一账号可同时使用 Chat Completions、Responses 和 Anthropic Messages 模型；原生 Messages 模型直接透传，其余模型仍支持 Messages → Chat Completions 兼容转换
@@ -47,26 +46,23 @@ cargo build --release
 
 1. **首次运行**：设置登录密码，创建账号。
 2. **新增账号**：填入名称和 API Key；Base URL 由系统自动处理。
-3. **设为默认**：代理请求未指定目标时使用。
-4. **代理调用**：任何 OpenAI 兼容客户端指向 `http://127.0.0.1:8787/v1`，
-   在请求头带上要用的账号：
+3. **设为默认**：作为内置对话页面的初始账号。
+4. **代理调用**：任何 OpenAI 兼容客户端指向 `http://127.0.0.1:8787/v1`：
 
 ```bash
 curl -N http://127.0.0.1:8787/v1/chat/completions \
-  -H "X-Key-Name: DeepSeek" \
   -H "Content-Type: application/json" \
   -d '{"model":"deepseek-chat","stream":true,"messages":[{"role":"user","content":"你好"}]}'
 ```
 
-> `X-Key-Id` 按 ID 精确匹配，`X-Key-Name` 按名称匹配（大小写不敏感），
-> 两者都不给则走默认账号。SDK 用法示例：
+> 默认按 round-robin 在支持该模型的账号间轮询；模型缓存未命中时在全部账号间轮询。
+> `X-Key-Id` / `X-Key-Name` 仅作为需要固定账号时的显式覆盖。SDK 用法示例：
 
 ```python
 from openai import OpenAI
 
 client = OpenAI(
     base_url="http://127.0.0.1:8787/v1",
-    default_headers={"X-Key-Name": "DeepSeek"},
     api_key="sk-...",  # 在「设置 → 客户端访问密钥」中创建
 )
 print(client.chat.completions.create(

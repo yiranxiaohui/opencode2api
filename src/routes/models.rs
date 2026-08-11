@@ -21,7 +21,13 @@ pub async fn models(State(st): State<AppState>, _: Unlocked, headers: HeaderMap)
 }
 
 async fn models_inner(st: AppState, headers: &HeaderMap) -> Result<Value, ApiError> {
-    let _client = super::proxy::authenticate_client(&st, headers)?;
+    let _client = match super::proxy::authenticate_client(&st, headers) {
+        Ok(client) => client,
+        Err(error) => {
+            super::logs::record_auth_failure(&st, "GET", "/models", &error);
+            return Err(error);
+        }
+    };
     let routes = st.db.list_keys()?;
     if routes.is_empty() {
         return Err(ApiError::BadRequest("no upstream routes configured".into()));

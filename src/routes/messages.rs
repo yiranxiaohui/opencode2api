@@ -34,7 +34,13 @@ async fn messages_inner(
     input: Value,
 ) -> Result<Response, ApiError> {
     let started = Instant::now();
-    let client_key = authenticate(&st, headers)?;
+    let client_key = match authenticate(&st, headers) {
+        Ok(client_key) => client_key,
+        Err(error) => {
+            logs::record_auth_failure(&st, "POST", "/messages", &error);
+            return Err(error);
+        }
+    };
     let model = input
         .get("model")
         .and_then(Value::as_str)
@@ -64,14 +70,42 @@ async fn messages_inner(
             return Err(e);
         }
     };
-    let upstream_key = st.decrypt_secret(&row.api_key_enc).await?;
+    let upstream_key = match st.decrypt_secret(&row.api_key_enc).await {
+        Ok(upstream_key) => upstream_key,
+        Err(error) => {
+            logs::record_failure(
+                &st,
+                &client_key,
+                Some(&row),
+                "POST",
+                "/messages",
+                started.elapsed().as_millis() as i64,
+                &error,
+            );
+            return Err(error);
+        }
+    };
     let stream = input
         .get("stream")
         .and_then(Value::as_bool)
         .unwrap_or(false);
     let request = to_openai_request(&input)?;
     let url = format!("{}/chat/completions", crate::models::OPENCODE_BASE_URL);
-    let upstream_client = st.client_for_key(&row).await?;
+    let upstream_client = match st.client_for_key(&row).await {
+        Ok(upstream_client) => upstream_client,
+        Err(error) => {
+            logs::record_failure(
+                &st,
+                &client_key,
+                Some(&row),
+                "POST",
+                "/messages",
+                started.elapsed().as_millis() as i64,
+                &error,
+            );
+            return Err(error);
+        }
+    };
     let upstream = match upstream_client
         .post(url)
         .bearer_auth(upstream_key.as_str())

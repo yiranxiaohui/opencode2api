@@ -384,20 +384,6 @@ impl Db {
         .map_err(ApiError::from)
     }
 
-    pub fn get_default_key(&self) -> Result<Option<KeyRow>, ApiError> {
-        let conn = self.0.lock().unwrap();
-        conn.query_row(
-            &format!(
-                "SELECT {KEY_SELECT}, p.name FROM api_keys
-                 LEFT JOIN proxies p ON p.id = api_keys.proxy_id WHERE api_keys.is_default = 1 LIMIT 1"
-            ),
-            [],
-            row_to_key,
-        )
-        .optional()
-        .map_err(ApiError::from)
-    }
-
     // ---- writes -------------------------------------------------------------
 
     pub fn insert_key(&self, id: &str, data: &KeyData, now: i64) -> Result<(), ApiError> {
