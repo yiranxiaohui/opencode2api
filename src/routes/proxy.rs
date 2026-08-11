@@ -292,9 +292,14 @@ pub(crate) fn native_endpoint_for_model(model: &str) -> Option<&'static str> {
     }
 }
 
-/// Shared bearer-token verification for both proxy endpoints.
+/// Verify one raw client credential. A Bearer prefix is accepted
+/// case-insensitively for callers that pass the complete header value.
 pub fn authenticate_with(st: &AppState, raw: &str) -> Result<crate::db::ClientKeyRow, ApiError> {
-    let key = raw.strip_prefix("Bearer ").unwrap_or(raw);
+    let raw = raw.trim();
+    let key = raw
+        .split_once(' ')
+        .filter(|(scheme, key)| scheme.eq_ignore_ascii_case("bearer") && !key.is_empty())
+        .map_or(raw, |(_, key)| key.trim());
     let hash = crate::crypto::hash_client_key(key);
     let row = st
         .db
@@ -308,19 +313,35 @@ pub(crate) fn authenticate_client(
     st: &AppState,
     headers: &HeaderMap,
 ) -> Result<crate::db::ClientKeyRow, ApiError> {
-    let value = headers
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .ok_or_else(|| ApiError::Unauthorized("missing Authorization bearer token".into()))?;
-    let (scheme, api_key) = value
-        .split_once(' ')
-        .ok_or_else(|| ApiError::Unauthorized("invalid Authorization bearer token".into()))?;
-    if !scheme.eq_ignore_ascii_case("bearer") || api_key.is_empty() {
-        return Err(ApiError::Unauthorized(
-            "invalid Authorization bearer token".into(),
-        ));
+    let credentials = credential_candidates(headers);
+    if credentials.is_empty() {
+        return Err(ApiError::Unauthorized("missing API key".into()));
     }
-    authenticate_with(st, api_key)
+    for credential in credentials {
+        match authenticate_with(st, credential) {
+            Ok(client) => return Ok(client),
+            Err(ApiError::Unauthorized(_)) => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    Err(ApiError::Unauthorized("invalid API key".into()))
+}
+
+/// Accept both common SDK conventions. Keep both candidates so a stale header
+/// injected by one client layer cannot shadow a valid credential from another.
+fn credential_candidates(headers: &HeaderMap) -> Vec<&str> {
+    let mut credentials = Vec::with_capacity(2);
+    if let Some(value) = header_str(headers, "x-api-key").filter(|value| !value.trim().is_empty()) {
+        credentials.push(value.trim());
+    }
+    if let Some(value) = header_str(headers, "authorization")
+        && let Some((scheme, key)) = value.split_once(' ')
+        && scheme.eq_ignore_ascii_case("bearer")
+        && !key.trim().is_empty()
+    {
+        credentials.push(key.trim());
+    }
+    credentials
 }
 
 pub(crate) async fn resolve_target(
@@ -376,10 +397,13 @@ fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{candidates_for_model, native_endpoint_for_model, should_forward_stream};
+    use super::{
+        candidates_for_model, credential_candidates, native_endpoint_for_model,
+        should_forward_stream,
+    };
     use crate::db::KeyRow;
     use crate::models::ModelInfo;
-    use axum::http::StatusCode;
+    use axum::http::{HeaderMap, StatusCode};
 
     fn key(name: &str, models: &[&str]) -> KeyRow {
         KeyRow {
@@ -448,6 +472,18 @@ mod tests {
         assert!(!should_forward_stream(true, StatusCode::UNAUTHORIZED));
         assert!(!should_forward_stream(true, StatusCode::FORBIDDEN));
         assert!(should_forward_stream(true, StatusCode::OK));
+    }
+
+    #[test]
+    fn both_api_key_header_conventions_are_authentication_candidates() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-api-key", "stale-key".parse().unwrap());
+        headers.insert("authorization", "bEaReR valid-key".parse().unwrap());
+
+        assert_eq!(
+            credential_candidates(&headers),
+            vec!["stale-key", "valid-key"]
+        );
     }
 }
 

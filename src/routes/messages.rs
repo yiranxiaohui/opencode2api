@@ -8,7 +8,6 @@ use axum::response::{IntoResponse, Response};
 use futures_util::StreamExt;
 use serde_json::{Value, json};
 
-use crate::db::ClientKeyRow;
 use crate::error::ApiError;
 use crate::middleware::Unlocked;
 use crate::routes::logs::{self, LogInput};
@@ -34,7 +33,7 @@ async fn messages_inner(
     input: Value,
 ) -> Result<Response, ApiError> {
     let started = Instant::now();
-    let client_key = match authenticate(&st, headers) {
+    let client_key = match super::proxy::authenticate_client(&st, headers) {
         Ok(client_key) => client_key,
         Err(error) => {
             logs::record_auth_failure(&st, "POST", "/messages", &error);
@@ -201,15 +200,6 @@ async fn messages_inner(
         },
     );
     Ok(Json(to_anthropic_response(value)?).into_response())
-}
-
-fn authenticate(st: &AppState, headers: &HeaderMap) -> Result<ClientKeyRow, ApiError> {
-    let raw = headers
-        .get("x-api-key")
-        .or_else(|| headers.get(axum::http::header::AUTHORIZATION))
-        .and_then(|v| v.to_str().ok())
-        .ok_or_else(|| ApiError::Unauthorized("missing API key".into()))?;
-    super::proxy::authenticate_with(st, raw)
 }
 
 fn to_openai_request(input: &Value) -> Result<Value, ApiError> {
