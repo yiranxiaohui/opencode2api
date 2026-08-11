@@ -154,8 +154,7 @@ mod tests {
 
     #[tokio::test]
     async fn quota_cooldown_marks_and_expires() {
-        let path = std::env::temp_dir()
-            .join(format!("oc2a-state-{}.db", uuid::Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!("oc2a-state-{}.db", uuid::Uuid::new_v4()));
         crate::migration::run(&path).await.unwrap();
         let st = AppState::new(&path, PathBuf::from("frontend/dist")).unwrap();
         let now = crate::models::now_secs();

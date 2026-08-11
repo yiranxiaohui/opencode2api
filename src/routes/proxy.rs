@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use axum::body::Body;
+use axum::body::{Body, Bytes};
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -81,6 +81,7 @@ pub(crate) async fn proxy_inner(
         .map_err(|e| ApiError::Internal(format!("read request body: {e}")))?
         .to_bytes();
     let (model, stream) = request_meta(&body_bytes);
+    let body_bytes = include_stream_usage(body_bytes, path, stream);
     let affinity = affinity_key(headers, &client.id, model.as_deref());
 
     let row = match resolve_target(&st, headers, model.as_deref(), &affinity).await {
@@ -297,6 +298,31 @@ fn request_meta(body: &[u8]) -> (Option<String>, bool) {
     (model, stream)
 }
 
+/// OpenAI-compatible chat streams only include their final usage frame when
+/// explicitly requested. Ask for it so request logs can record token usage,
+/// while leaving non-chat, non-streaming and non-JSON bodies untouched.
+fn include_stream_usage(body: Bytes, path: &str, stream: bool) -> Bytes {
+    if !stream || path.trim_matches('/') != "chat/completions" {
+        return body;
+    }
+    let Ok(mut value) = serde_json::from_slice::<Value>(&body) else {
+        return body;
+    };
+    let Some(request) = value.as_object_mut() else {
+        return body;
+    };
+    let options = request.entry("stream_options").or_insert_with(|| json!({}));
+    if !options.is_object() {
+        *options = json!({});
+    }
+    options
+        .as_object_mut()
+        .expect("stream_options was replaced with an object")
+        .insert("include_usage".into(), Value::Bool(true));
+
+    serde_json::to_vec(&value).map(Bytes::from).unwrap_or(body)
+}
+
 /// Models exposed by OpenCode Zen do not all use the same wire protocol.
 /// Keep this list in one place so special routes (notably `/messages`) can
 /// decide whether to proxy natively or apply a compatibility conversion.
@@ -451,6 +477,10 @@ fn select_sticky_account<'a>(
 /// quota cooldown, ordered by descending rendezvous hash. First = the sticky
 /// winner; the remaining order is the deterministic failover order for the
 /// affinity key. Independent of input order.
+// This helper is not yet reachable from production code; the automatic
+// account-failover routing (Task 4) will call `ordered_candidates`, so silence
+// the dead-code warning until then.
+#[allow(dead_code)]
 fn ordered_candidates<'a, F>(
     candidates: &'a [crate::db::KeyRow],
     affinity: &str,
@@ -530,7 +560,9 @@ pub(crate) fn is_quota_error(status: StatusCode, body: &[u8]) -> bool {
         .collect::<Vec<_>>()
         .join("\n")
         .to_lowercase();
-    QUOTA_KEYWORDS.iter().any(|keyword| haystack.contains(keyword))
+    QUOTA_KEYWORDS
+        .iter()
+        .any(|keyword| haystack.contains(keyword))
 }
 
 fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
@@ -540,12 +572,13 @@ fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
 #[cfg(test)]
 mod tests {
     use super::{
-        affinity_key, candidates_for_model, credential_candidates, insert_upstream_auth,
-        is_quota_error, native_endpoint_for_model, ordered_candidates, select_sticky_account,
-        should_forward_stream,
+        affinity_key, candidates_for_model, credential_candidates, include_stream_usage,
+        insert_upstream_auth, is_quota_error, native_endpoint_for_model, ordered_candidates,
+        select_sticky_account, should_forward_stream,
     };
     use crate::db::KeyRow;
     use crate::models::ModelInfo;
+    use axum::body::Bytes;
     use axum::http::{HeaderMap, StatusCode};
 
     fn key(name: &str, models: &[&str]) -> KeyRow {
@@ -719,7 +752,10 @@ mod tests {
             StatusCode::NOT_FOUND,
             br#"{"error":{"message":"model not found"}}"#
         ));
-        assert!(!is_quota_error(StatusCode::INTERNAL_SERVER_ERROR, quota_body));
+        assert!(!is_quota_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            quota_body
+        ));
         assert!(!is_quota_error(StatusCode::OK, quota_body));
         assert!(!is_quota_error(StatusCode::TOO_MANY_REQUESTS, b"not json"));
     }
@@ -756,6 +792,27 @@ mod tests {
             .collect();
         assert_eq!(ids.len(), 2);
         assert!(!ids.contains(&"b"));
+    }
+
+    #[test]
+    fn requests_usage_for_streaming_chat_completions() {
+        let body =
+            Bytes::from_static(br#"{"model":"deepseek-v4-flash","stream":true,"messages":[]}"#);
+        let body = include_stream_usage(body, "/chat/completions/", true);
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            value.pointer("/stream_options/include_usage"),
+            Some(&serde_json::Value::Bool(true))
+        );
+    }
+
+    #[test]
+    fn preserves_non_streaming_request_body() {
+        let body = Bytes::from_static(br#"{"stream":false,"messages":[]}"#);
+        assert_eq!(
+            include_stream_usage(body.clone(), "chat/completions", false),
+            body
+        );
     }
 }
 

@@ -181,6 +181,17 @@ pub struct Usage {
     pub cache_creation: Option<i64>,
 }
 
+impl Usage {
+    fn merge(self, newer: Self) -> Self {
+        Self {
+            prompt: newer.prompt.or(self.prompt),
+            completion: newer.completion.or(self.completion),
+            cached: newer.cached.or(self.cached),
+            cache_creation: newer.cache_creation.or(self.cache_creation),
+        }
+    }
+}
+
 pub fn usage_from_json(value: &Value) -> Option<Usage> {
     let cache_read = value
         .pointer("/usage/cache_read_input_tokens")
@@ -213,6 +224,11 @@ pub fn usage_from_json(value: &Value) -> Option<Usage> {
             .or_else(|| {
                 value
                     .pointer("/usage/input_tokens_details/cached_tokens")
+                    .and_then(Value::as_i64)
+            })
+            .or_else(|| {
+                value
+                    .pointer("/usage/prompt_cache_hit_tokens")
                     .and_then(Value::as_i64)
             })
             .or(cache_read),
@@ -254,8 +270,13 @@ where
 {
     let mut stream = Box::pin(stream);
     let mut buffer = String::new();
-    let mut usage: Option<Usage> = None;
-    let mut first_token_ms: Option<i64> = None;
+    let mut finalizer = StreamLogFinalizer {
+        st,
+        log_id,
+        started,
+        usage: None,
+        first_token_ms: None,
+    };
     async_stream::stream! {
         while let Some(chunk) = stream.next().await {
             match chunk {
@@ -264,16 +285,20 @@ where
                     while let Some(pos) = buffer.find('\n') {
                         let line = buffer[..pos].trim().to_string();
                         buffer.drain(..=pos);
-                        if let Some(data) = line.strip_prefix("data: ") {
-                            if data != "[DONE]" {
-                                if let Ok(value) = serde_json::from_str::<Value>(data) {
-                                    if first_token_ms.is_none() && has_output_delta(&value) {
-                                        first_token_ms = Some(started.elapsed().as_millis() as i64);
-                                    }
-                                    if let Some(u) = usage_from_json(&value) {
-                                        usage = Some(u);
-                                    }
-                                }
+                        if let Some(data) = line.strip_prefix("data:").map(str::trim_start)
+                            && data != "[DONE]"
+                            && let Ok(value) = serde_json::from_str::<Value>(data)
+                        {
+                            if finalizer.first_token_ms.is_none() && has_output_delta(&value) {
+                                finalizer.first_token_ms =
+                                    Some(started.elapsed().as_millis() as i64);
+                            }
+                            if let Some(u) = usage_from_json(&value) {
+                                finalizer.usage = Some(
+                                    finalizer
+                                        .usage
+                                        .map_or(u, |current| current.merge(u)),
+                                );
                             }
                         }
                     }
@@ -285,17 +310,46 @@ where
                 }
             }
         }
-        let usage = usage.unwrap_or_default();
-        let _ = st.db.finalize_stream_log(
-            &log_id,
-            first_token_ms,
-            started.elapsed().as_millis() as i64,
+    }
+}
+
+struct StreamLogFinalizer {
+    st: AppState,
+    log_id: String,
+    started: Instant,
+    usage: Option<Usage>,
+    first_token_ms: Option<i64>,
+}
+
+impl Drop for StreamLogFinalizer {
+    fn drop(&mut self) {
+        let usage = self.usage.unwrap_or_default();
+        let _ = self.st.db.finalize_stream_log(
+            &self.log_id,
+            self.first_token_ms,
+            self.started.elapsed().as_millis() as i64,
             usage.prompt,
             usage.completion,
             usage.cached,
             usage.cache_creation,
         );
     }
+}
+
+fn has_output_delta(value: &Value) -> bool {
+    value
+        .pointer("/choices/0/delta/content")
+        .and_then(Value::as_str)
+        .is_some_and(|text| !text.is_empty())
+        || value
+            .pointer("/choices/0/delta/reasoning_content")
+            .and_then(Value::as_str)
+            .is_some_and(|text| !text.is_empty())
+        || value
+            .pointer("/choices/0/delta/reasoning")
+            .and_then(Value::as_str)
+            .is_some_and(|text| !text.is_empty())
+        || value.pointer("/choices/0/delta/tool_calls").is_some()
 }
 
 #[cfg(test)]
@@ -315,13 +369,36 @@ mod tests {
         let usage = usage_from_json(&messages).unwrap();
         assert_eq!(usage.cached, Some(60));
         assert_eq!(usage.cache_creation, Some(30));
-    }
-}
 
-fn has_output_delta(value: &Value) -> bool {
-    value
-        .pointer("/choices/0/delta/content")
-        .and_then(Value::as_str)
-        .is_some_and(|text| !text.is_empty())
-        || value.pointer("/choices/0/delta/tool_calls").is_some()
+        let deepseek = json!({"usage":{"prompt_tokens":100,"completion_tokens":20,"prompt_cache_hit_tokens":75,"prompt_cache_miss_tokens":25}});
+        assert_eq!(usage_from_json(&deepseek).unwrap().cached, Some(75));
+    }
+
+    #[test]
+    fn merges_usage_split_across_stream_events() {
+        let input = Usage {
+            prompt: Some(100),
+            cached: Some(75),
+            ..Usage::default()
+        };
+        let output = Usage {
+            completion: Some(20),
+            ..Usage::default()
+        };
+        assert_eq!(
+            input.merge(output),
+            Usage {
+                prompt: Some(100),
+                completion: Some(20),
+                cached: Some(75),
+                cache_creation: None,
+            }
+        );
+    }
+
+    #[test]
+    fn reasoning_delta_counts_as_first_output() {
+        let delta = json!({"choices":[{"delta":{"reasoning_content":"thinking"}}]});
+        assert!(has_output_delta(&delta));
+    }
 }
