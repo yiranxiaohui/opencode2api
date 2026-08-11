@@ -14,7 +14,6 @@ use crate::routes::logs::{self, LogInput};
 use crate::state::AppState;
 
 /// Unified OpenAI-compatible gateway: forwards `/v1/*` to a sticky-session key.
-/// `X-Key-Id` / `X-Key-Name` remain available as explicit overrides.
 /// SSE (stream: true) is forwarded incrementally via `Body::from_stream`.
 pub async fn proxy(
     State(st): State<AppState>,
@@ -84,29 +83,13 @@ pub(crate) async fn proxy_inner(
     let body_bytes = include_stream_usage(body_bytes, path, stream);
     let affinity = affinity_key(headers, &client.id, model.as_deref());
 
-    let row = match resolve_target(&st, headers, model.as_deref(), &affinity).await {
-        Ok(row) => row,
+    let candidates = match routing_candidates(&st, model.as_deref(), &affinity).await {
+        Ok(rows) => rows,
         Err(e) => {
             logs::record_failure(&st, &client, None, &method_str, path, 0, &e);
             return Err(e);
         }
     };
-    let api_key = match st.decrypt_secret(&row.api_key_enc).await {
-        Ok(api_key) => api_key,
-        Err(error) => {
-            logs::record_failure(
-                &st,
-                &client,
-                Some(&row),
-                &method_str,
-                path,
-                started.elapsed().as_millis() as i64,
-                &error,
-            );
-            return Err(error);
-        }
-    };
-
     let base = crate::models::OPENCODE_BASE_URL;
     let path = path.trim_matches('/');
     let url = if path.is_empty() {
@@ -130,126 +113,215 @@ pub(crate) async fn proxy_inner(
             fwd.insert(h, v.clone());
         }
     }
-    insert_upstream_auth(&mut fwd, api_key.as_str(), path)?;
-
-    let upstream_client = match st.client_for_key(&row).await {
-        Ok(upstream_client) => upstream_client,
-        Err(error) => {
-            logs::record_failure(
-                &st,
-                &client,
-                Some(&row),
-                &method_str,
-                path,
-                started.elapsed().as_millis() as i64,
-                &error,
-            );
-            return Err(error);
+    let mut last_quota_error: Option<(StatusCode, HeaderMap, Bytes)> = None;
+    for row in &candidates {
+        let api_key = match st.decrypt_secret(&row.api_key_enc).await {
+            Ok(api_key) => api_key,
+            Err(error) => {
+                logs::record_failure(
+                    &st,
+                    &client,
+                    Some(row),
+                    &method_str,
+                    path,
+                    started.elapsed().as_millis() as i64,
+                    &error,
+                );
+                return Err(error);
+            }
+        };
+        let upstream_client = match st.client_for_key(row).await {
+            Ok(upstream_client) => upstream_client,
+            Err(error) => {
+                logs::record_failure(
+                    &st,
+                    &client,
+                    Some(row),
+                    &method_str,
+                    path,
+                    started.elapsed().as_millis() as i64,
+                    &error,
+                );
+                return Err(error);
+            }
+        };
+        let mut req_headers = fwd.clone();
+        insert_upstream_auth(&mut req_headers, api_key.as_str(), path)?;
+        let mut req = upstream_client
+            .request(method.clone(), &url)
+            .headers(req_headers);
+        if !body_bytes.is_empty() {
+            req = req.body(body_bytes.clone());
         }
-    };
-    let mut req = upstream_client.request(method, &url).headers(fwd);
-    if !body_bytes.is_empty() {
-        req = req.body(body_bytes);
-    }
-    let resp = match req.send().await {
-        Ok(resp) => resp,
-        Err(e) => {
-            let err = ApiError::Upstream(format!("upstream unreachable: {e}"));
-            logs::record_failure(
-                &st,
-                &client,
-                Some(&row),
-                &method_str,
-                path,
-                started.elapsed().as_millis() as i64,
-                &err,
-            );
-            return Err(err);
+        let resp = match req.send().await {
+            Ok(resp) => resp,
+            Err(e) => {
+                let err = ApiError::Upstream(format!("upstream unreachable: {e}"));
+                logs::record_failure(
+                    &st,
+                    &client,
+                    Some(row),
+                    &method_str,
+                    path,
+                    started.elapsed().as_millis() as i64,
+                    &err,
+                );
+                return Err(err);
+            }
+        };
+
+        let status = resp.status();
+        let latency_ms = started.elapsed().as_millis() as i64;
+        let mut resp_headers = resp.headers().clone();
+        for h in [
+            "content-length",
+            "transfer-encoding",
+            "connection",
+            "accept-encoding",
+        ] {
+            resp_headers.remove(h);
         }
-    };
 
-    let status = resp.status();
-    let latency_ms = started.elapsed().as_millis() as i64;
-    let mut resp_headers = resp.headers().clone();
-    // Strip hop-by-hop headers: we re-chunk the stream ourselves.
-    for h in [
-        "content-length",
-        "transfer-encoding",
-        "connection",
-        "accept-encoding",
-    ] {
-        resp_headers.remove(h);
-    }
+        if status.is_success() {
+            if should_forward_stream(stream, status) {
+                let log_id = logs::insert_log(
+                    &st,
+                    &LogInput {
+                        client: &client,
+                        route: Some(row),
+                        method: &method_str,
+                        path,
+                        model: model.as_deref(),
+                        stream: true,
+                        status: status.as_u16(),
+                        latency_ms,
+                        prompt_tokens: None,
+                        completion_tokens: None,
+                        cached_tokens: None,
+                        cache_creation_tokens: None,
+                        error: None,
+                    },
+                )
+                .unwrap_or_default();
+                let body_stream = resp.bytes_stream();
+                let resp_body =
+                    Body::from_stream(logs::capture_usage_stream(body_stream, st, log_id, started));
+                return Ok((status, resp_headers, resp_body).into_response());
+            }
 
-    // An upstream authentication failure is a regular JSON error even when the
-    // client requested SSE. Buffer all non-success responses so their message
-    // is captured in the request log instead of disappearing into the stream.
-    if should_forward_stream(stream, status) {
-        // Streaming: forward each SSE frame as it arrives. Record the call with
-        // TTFB latency now; token usage is backfilled when the stream ends.
-        let log_id = logs::insert_log(
+            let bytes = match resp.bytes().await {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    let err = ApiError::Upstream(format!("upstream response read failed: {e}"));
+                    logs::record_failure(
+                        &st,
+                        &client,
+                        Some(row),
+                        &method_str,
+                        path,
+                        latency_ms,
+                        &err,
+                    );
+                    return Err(err);
+                }
+            };
+            let usage = logs::usage_from_bytes(&bytes);
+            let _ = logs::insert_log(
+                &st,
+                &LogInput {
+                    client: &client,
+                    route: Some(row),
+                    method: &method_str,
+                    path,
+                    model: model.as_deref(),
+                    stream: false,
+                    status: status.as_u16(),
+                    latency_ms,
+                    prompt_tokens: usage.and_then(|u| u.prompt),
+                    completion_tokens: usage.and_then(|u| u.completion),
+                    cached_tokens: usage.and_then(|u| u.cached),
+                    cache_creation_tokens: usage.and_then(|u| u.cache_creation),
+                    error: None,
+                },
+            );
+            return Ok((status, resp_headers, Body::from(bytes)).into_response());
+        }
+
+        // Failed responses are buffered before classification. Only explicit
+        // quota exhaustion advances to the next account; all other failures
+        // remain transparent to the caller.
+        let bytes = match resp.bytes().await {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                let err = ApiError::Upstream(format!("upstream response read failed: {e}"));
+                logs::record_failure(&st, &client, Some(row), &method_str, path, latency_ms, &err);
+                return Err(err);
+            }
+        };
+        if is_quota_error(status, &bytes) {
+            st.begin_cooldown(&row.id);
+            let _ = logs::insert_log(
+                &st,
+                &LogInput {
+                    client: &client,
+                    route: Some(row),
+                    method: &method_str,
+                    path,
+                    model: model.as_deref(),
+                    stream: false,
+                    status: status.as_u16(),
+                    latency_ms,
+                    prompt_tokens: None,
+                    completion_tokens: None,
+                    cached_tokens: None,
+                    cache_creation_tokens: None,
+                    error: Some("额度耗尽，切换至备用账号".into()),
+                },
+            );
+            last_quota_error = Some((status, resp_headers, bytes));
+            continue;
+        }
+
+        let error = logs::error_from_bytes(&bytes);
+        let _ = logs::insert_log(
             &st,
             &LogInput {
                 client: &client,
-                route: Some(&row),
+                route: Some(row),
                 method: &method_str,
                 path,
                 model: model.as_deref(),
-                stream: true,
+                stream: false,
                 status: status.as_u16(),
                 latency_ms,
                 prompt_tokens: None,
                 completion_tokens: None,
                 cached_tokens: None,
                 cache_creation_tokens: None,
-                error: None,
+                error,
             },
-        )
-        .unwrap_or_default();
-        let stream = resp.bytes_stream();
-        let resp_body = Body::from_stream(logs::capture_usage_stream(stream, st, log_id, started));
-        return Ok((status, resp_headers, resp_body).into_response());
+        );
+        return Ok((status, resp_headers, Body::from(bytes)).into_response());
     }
 
-    // Non-stream: buffer the full response so we can read token usage / error.
-    let bytes = match resp.bytes().await {
-        Ok(bytes) => bytes,
-        Err(e) => {
-            let err = ApiError::Upstream(format!("upstream response read failed: {e}"));
-            logs::record_failure(
-                &st,
-                &client,
-                Some(&row),
-                &method_str,
-                path,
-                latency_ms,
-                &err,
-            );
-            return Err(err);
-        }
-    };
-    let usage = logs::usage_from_bytes(&bytes);
-    let error = if status.is_client_error() || status.is_server_error() {
-        logs::error_from_bytes(&bytes)
-    } else {
-        None
-    };
+    let (status, resp_headers, bytes) =
+        last_quota_error.expect("routing_candidates returned at least one attempted account");
     let _ = logs::insert_log(
         &st,
         &LogInput {
             client: &client,
-            route: Some(&row),
+            route: candidates.last(),
             method: &method_str,
             path,
             model: model.as_deref(),
             stream: false,
             status: status.as_u16(),
-            latency_ms,
-            prompt_tokens: usage.and_then(|u| u.prompt),
-            completion_tokens: usage.and_then(|u| u.completion),
-            cached_tokens: usage.and_then(|u| u.cached),
-            cache_creation_tokens: usage.and_then(|u| u.cache_creation),
-            error,
+            latency_ms: started.elapsed().as_millis() as i64,
+            prompt_tokens: None,
+            completion_tokens: None,
+            cached_tokens: None,
+            cache_creation_tokens: None,
+            error: Some("全部候选账号额度耗尽".into()),
         },
     );
     Ok((status, resp_headers, Body::from(bytes)).into_response())
@@ -391,47 +463,27 @@ fn credential_candidates(headers: &HeaderMap) -> Vec<&str> {
     credentials
 }
 
-pub(crate) async fn resolve_target(
+/// Enabled, model-matching accounts ordered by descending rendezvous hash,
+/// with quota-cooled accounts skipped. Distinguishes an empty configured pool
+/// from a pool whose eligible accounts are all cooling down.
+pub(crate) async fn routing_candidates(
     st: &AppState,
-    headers: &HeaderMap,
     model: Option<&str>,
     affinity: &str,
-) -> Result<crate::db::KeyRow, ApiError> {
-    if let Some(id) = header_str(headers, "x-key-id") {
-        if let Some(row) = st.db.get_key(id)? {
-            if !row.is_enabled {
-                return Err(ApiError::BadRequest(format!(
-                    "account is disabled: {}",
-                    row.name
-                )));
-            }
-            return Ok(row);
-        }
-        return Err(ApiError::BadRequest(format!("x-key-id not found: {id}")));
-    }
-    if let Some(name) = header_str(headers, "x-key-name") {
-        if let Some(row) = st.db.get_key_by_name(name)? {
-            if !row.is_enabled {
-                return Err(ApiError::BadRequest(format!(
-                    "account is disabled: {}",
-                    row.name
-                )));
-            }
-            return Ok(row);
-        }
-        return Err(ApiError::BadRequest(format!(
-            "x-key-name not found: {name}"
-        )));
-    }
+) -> Result<Vec<crate::db::KeyRow>, ApiError> {
     let rows = st.db.all_key_rows()?;
-    let candidates = candidates_for_model(rows, model);
-    if candidates.is_empty() {
+    let base = candidates_for_model(rows, model);
+    if base.is_empty() {
         return Err(ApiError::BadRequest("no account configured".into()));
     }
-
-    Ok(select_sticky_account(&candidates, affinity)
-        .expect("non-empty candidates")
-        .clone())
+    let now = crate::models::now_secs();
+    let ordered = ordered_candidates(&base, affinity, |id| st.in_quota_cooldown(id, now));
+    if ordered.is_empty() {
+        return Err(ApiError::BadRequest(
+            "all candidate accounts are in quota cooldown".into(),
+        ));
+    }
+    Ok(ordered.into_iter().cloned().collect())
 }
 
 /// Build a stable routing key. Explicit session headers allow one client to
@@ -464,6 +516,7 @@ fn rendezvous_hash(affinity: &str, id: &str) -> u64 {
 /// Highest-random-weight hashing provides deterministic affinity independent of
 /// database ordering and minimizes remapping when accounts are added to or
 /// removed from the eligible model pool.
+#[cfg(test)]
 fn select_sticky_account<'a>(
     candidates: &'a [crate::db::KeyRow],
     affinity: &str,
@@ -477,10 +530,6 @@ fn select_sticky_account<'a>(
 /// quota cooldown, ordered by descending rendezvous hash. First = the sticky
 /// winner; the remaining order is the deterministic failover order for the
 /// affinity key. Independent of input order.
-// This helper is not yet reachable from production code; the automatic
-// account-failover routing (Task 4) will call `ordered_candidates`, so silence
-// the dead-code warning until then.
-#[allow(dead_code)]
 fn ordered_candidates<'a, F>(
     candidates: &'a [crate::db::KeyRow],
     affinity: &str,
@@ -493,7 +542,7 @@ where
         .iter()
         .filter(|row| !in_cooldown(&row.id))
         .collect();
-    ordered.sort_by(|a, b| rendezvous_hash(affinity, &b.id).cmp(&rendezvous_hash(affinity, &a.id)));
+    ordered.sort_by_key(|row| std::cmp::Reverse(rendezvous_hash(affinity, &row.id)));
     ordered
 }
 
@@ -537,10 +586,6 @@ pub(crate) const QUOTA_COOLDOWN_SECS: i64 = 900;
 /// hard signal; other 4xx bodies are scanned in the OpenAI error fields only.
 /// Conservative by design: plain rate limiting (`rate_limit_exceeded`), missing
 /// models, and 5xx must never trigger failover.
-// This classifier is not yet reachable from production code; the automatic
-// account-failover loop (Tasks 5/6) will call `is_quota_error` (which in turn
-// reads `QUOTA_KEYWORDS`), so silence the dead-code warning until then.
-#[allow(dead_code)]
 pub(crate) fn is_quota_error(status: StatusCode, body: &[u8]) -> bool {
     if status == StatusCode::PAYMENT_REQUIRED {
         return true;
@@ -792,6 +837,15 @@ mod tests {
             .collect();
         assert_eq!(ids.len(), 2);
         assert!(!ids.contains(&"b"));
+    }
+
+    #[test]
+    fn all_cooled_candidates_yield_empty_active_list() {
+        let rows = vec![key("a", &["m"]), key("b", &["m"])];
+        let base = candidates_for_model(rows, Some("m"));
+        assert_eq!(base.len(), 2);
+        let active = ordered_candidates(&base, "k", |_| true);
+        assert!(active.is_empty());
     }
 
     #[test]

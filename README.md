@@ -57,7 +57,7 @@ curl -N http://127.0.0.1:8787/v1/chat/completions \
 ```
 
 > 建议为每段对话传入稳定且唯一的 `X-Session-Id`（也兼容 `X-Conversation-Id`）。同一会话和模型始终映射到同一账号，不同会话则分散到账号池。未传会话 ID 时，以客户端访问密钥和模型作为粘性键；模型缓存未命中时在全部账号中执行相同的粘性选择。
-> `X-Key-Id` / `X-Key-Name` 仅作为需要固定账号时的显式覆盖。SDK 用法示例：
+> 额度耗尽的账号会自动切换到候选池中的备用账号，15 分钟冷却后恢复。SDK 用法示例：
 
 ```python
 from openai import OpenAI

@@ -63,144 +63,194 @@ async fn messages_inner(
         .await;
     }
     let affinity = super::proxy::affinity_key(headers, &client_key.id, Some(&model));
-    let row = match super::proxy::resolve_target(&st, headers, Some(&model), &affinity).await {
-        Ok(row) => row,
+    let candidates = match super::proxy::routing_candidates(&st, Some(&model), &affinity).await {
+        Ok(rows) => rows,
         Err(e) => {
             logs::record_failure(&st, &client_key, None, "POST", "/messages", 0, &e);
             return Err(e);
-        }
-    };
-    let upstream_key = match st.decrypt_secret(&row.api_key_enc).await {
-        Ok(upstream_key) => upstream_key,
-        Err(error) => {
-            logs::record_failure(
-                &st,
-                &client_key,
-                Some(&row),
-                "POST",
-                "/messages",
-                started.elapsed().as_millis() as i64,
-                &error,
-            );
-            return Err(error);
         }
     };
     let stream = input
         .get("stream")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    let request = to_openai_request(&input)?;
     let url = format!("{}/chat/completions", crate::models::OPENCODE_BASE_URL);
-    let upstream_client = match st.client_for_key(&row).await {
-        Ok(upstream_client) => upstream_client,
-        Err(error) => {
-            logs::record_failure(
-                &st,
-                &client_key,
-                Some(&row),
-                "POST",
-                "/messages",
-                started.elapsed().as_millis() as i64,
-                &error,
-            );
-            return Err(error);
-        }
-    };
-    let upstream = match upstream_client
-        .post(url)
-        .bearer_auth(upstream_key.as_str())
-        .json(&request)
-        .send()
-        .await
-    {
-        Ok(resp) => resp,
-        Err(e) => {
-            let err = ApiError::Upstream(format!("upstream unreachable: {e}"));
-            logs::record_failure(
-                &st,
-                &client_key,
-                Some(&row),
-                "POST",
-                "/messages",
-                started.elapsed().as_millis() as i64,
-                &err,
-            );
-            return Err(err);
-        }
-    };
+    let mut last_quota_error: Option<(StatusCode, String)> = None;
+    for row in &candidates {
+        let upstream_key = match st.decrypt_secret(&row.api_key_enc).await {
+            Ok(upstream_key) => upstream_key,
+            Err(error) => {
+                logs::record_failure(
+                    &st,
+                    &client_key,
+                    Some(row),
+                    "POST",
+                    "/messages",
+                    started.elapsed().as_millis() as i64,
+                    &error,
+                );
+                return Err(error);
+            }
+        };
+        let request = to_openai_request(&input)?;
+        let upstream_client = match st.client_for_key(row).await {
+            Ok(upstream_client) => upstream_client,
+            Err(error) => {
+                logs::record_failure(
+                    &st,
+                    &client_key,
+                    Some(row),
+                    "POST",
+                    "/messages",
+                    started.elapsed().as_millis() as i64,
+                    &error,
+                );
+                return Err(error);
+            }
+        };
+        let upstream = match upstream_client
+            .post(&url)
+            .bearer_auth(upstream_key.as_str())
+            .json(&request)
+            .send()
+            .await
+        {
+            Ok(resp) => resp,
+            Err(e) => {
+                let err = ApiError::Upstream(format!("upstream unreachable: {e}"));
+                logs::record_failure(
+                    &st,
+                    &client_key,
+                    Some(row),
+                    "POST",
+                    "/messages",
+                    started.elapsed().as_millis() as i64,
+                    &err,
+                );
+                return Err(err);
+            }
+        };
 
-    let status = upstream.status();
-    let latency_ms = started.elapsed().as_millis() as i64;
+        let status = upstream.status();
+        let latency_ms = started.elapsed().as_millis() as i64;
+        if !status.is_success() {
+            let body = upstream.text().await.unwrap_or_default();
+            if super::proxy::is_quota_error(status, body.as_bytes()) {
+                st.begin_cooldown(&row.id);
+                let _ = logs::insert_log(
+                    &st,
+                    &LogInput {
+                        client: &client_key,
+                        route: Some(row),
+                        method: "POST",
+                        path: "/messages",
+                        model: Some(&model),
+                        stream: false,
+                        status: status.as_u16(),
+                        latency_ms,
+                        prompt_tokens: None,
+                        completion_tokens: None,
+                        cached_tokens: None,
+                        cache_creation_tokens: None,
+                        error: Some("额度耗尽，切换至备用账号".into()),
+                    },
+                );
+                last_quota_error = Some((status, body));
+                continue;
+            }
+            let error =
+                logs::error_from_bytes(body.as_bytes()).unwrap_or_else(|| status.to_string());
+            let _ = logs::insert_log(
+                &st,
+                &LogInput {
+                    client: &client_key,
+                    route: Some(row),
+                    method: "POST",
+                    path: "/messages",
+                    model: Some(&model),
+                    stream,
+                    status: status.as_u16(),
+                    latency_ms,
+                    prompt_tokens: None,
+                    completion_tokens: None,
+                    cached_tokens: None,
+                    cache_creation_tokens: None,
+                    error: Some(error),
+                },
+            );
+            return Ok((status, body).into_response());
+        }
 
-    if !status.is_success() {
-        let body = upstream.text().await.unwrap_or_default();
-        let error = logs::error_from_bytes(body.as_bytes()).unwrap_or_else(|| status.to_string());
+        if stream {
+            let log_id = logs::insert_log(
+                &st,
+                &LogInput {
+                    client: &client_key,
+                    route: Some(row),
+                    method: "POST",
+                    path: "/messages",
+                    model: Some(&model),
+                    stream: true,
+                    status: status.as_u16(),
+                    latency_ms,
+                    prompt_tokens: None,
+                    completion_tokens: None,
+                    cached_tokens: None,
+                    cache_creation_tokens: None,
+                    error: None,
+                },
+            )
+            .unwrap_or_default();
+            return Ok(stream_response(upstream, model, st, log_id, started));
+        }
+
+        let value: Value = upstream
+            .json()
+            .await
+            .map_err(|e| ApiError::Upstream(format!("invalid upstream response: {e}")))?;
+        let usage = logs::usage_from_json(&value);
         let _ = logs::insert_log(
             &st,
             &LogInput {
                 client: &client_key,
-                route: Some(&row),
+                route: Some(row),
                 method: "POST",
                 path: "/messages",
                 model: Some(&model),
-                stream,
+                stream: false,
                 status: status.as_u16(),
                 latency_ms,
-                prompt_tokens: None,
-                completion_tokens: None,
-                cached_tokens: None,
-                cache_creation_tokens: None,
-                error: Some(error),
-            },
-        );
-        return Ok((status, body).into_response());
-    }
-    if stream {
-        let log_id = logs::insert_log(
-            &st,
-            &LogInput {
-                client: &client_key,
-                route: Some(&row),
-                method: "POST",
-                path: "/messages",
-                model: Some(&model),
-                stream: true,
-                status: 200,
-                latency_ms,
-                prompt_tokens: None,
-                completion_tokens: None,
-                cached_tokens: None,
-                cache_creation_tokens: None,
+                prompt_tokens: usage.and_then(|u| u.prompt),
+                completion_tokens: usage.and_then(|u| u.completion),
+                cached_tokens: usage.and_then(|u| u.cached),
+                cache_creation_tokens: usage.and_then(|u| u.cache_creation),
                 error: None,
             },
-        )
-        .unwrap_or_default();
-        return Ok(stream_response(upstream, model, st, log_id, started));
+        );
+        return Ok(Json(to_anthropic_response(value)?).into_response());
     }
-    let value: Value = upstream
-        .json()
-        .await
-        .map_err(|e| ApiError::Upstream(format!("invalid upstream response: {e}")))?;
-    let usage = logs::usage_from_json(&value);
+
+    let (status, body) =
+        last_quota_error.expect("routing_candidates returned at least one attempted account");
     let _ = logs::insert_log(
         &st,
         &LogInput {
             client: &client_key,
-            route: Some(&row),
+            route: candidates.last(),
             method: "POST",
             path: "/messages",
             model: Some(&model),
             stream: false,
-            status: 200,
-            latency_ms,
-            prompt_tokens: usage.and_then(|u| u.prompt),
-            completion_tokens: usage.and_then(|u| u.completion),
-            cached_tokens: usage.and_then(|u| u.cached),
-            cache_creation_tokens: usage.and_then(|u| u.cache_creation),
-            error: None,
+            status: status.as_u16(),
+            latency_ms: started.elapsed().as_millis() as i64,
+            prompt_tokens: None,
+            completion_tokens: None,
+            cached_tokens: None,
+            cache_creation_tokens: None,
+            error: Some("全部候选账号额度耗尽".into()),
         },
     );
-    Ok(Json(to_anthropic_response(value)?).into_response())
+    Ok((status, body).into_response())
 }
 
 fn to_openai_request(input: &Value) -> Result<Value, ApiError> {
@@ -224,6 +274,9 @@ fn to_openai_request(input: &Value) -> Result<Value, ApiError> {
         "stream": input.get("stream").cloned().unwrap_or(json!(false)),
         "max_tokens": input.get("max_tokens").cloned().unwrap_or(json!(1024))
     });
+    if out.get("stream").and_then(Value::as_bool) == Some(true) {
+        out["stream_options"] = json!({"include_usage": true});
+    }
     for key in ["temperature", "top_p"] {
         if let Some(value) = input.get(key) {
             out[key] = value.clone();
@@ -397,6 +450,19 @@ mod tests {
             json!({"role":"user","content":"Hello"})
         );
         assert_eq!(output["max_tokens"], 128);
+    }
+
+    #[test]
+    fn streaming_conversion_requests_usage() {
+        let input = json!({
+            "model":"deepseek-v4-flash", "stream":true,
+            "messages":[{"role":"user","content":"Hello"}]
+        });
+        let output = to_openai_request(&input).unwrap();
+        assert_eq!(
+            output.pointer("/stream_options/include_usage"),
+            Some(&json!(true))
+        );
     }
 
     #[test]
