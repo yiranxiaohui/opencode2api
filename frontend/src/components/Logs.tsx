@@ -135,8 +135,8 @@ export default function Logs({ keys, clientKeys }: Props) {
         <div className="log-stats">
           <div className="log-stat-tiles">
             <StatTile label="调用次数" value={stats.totals.total_calls.toLocaleString()} />
-            <StatTile label="Prompt Token" value={fmtTokensNum(stats.totals.total_prompt_tokens)} />
-            <StatTile label="Completion Token" value={fmtTokensNum(stats.totals.total_completion_tokens)} />
+            <StatTile label="输入令牌" value={fmtTokensNum(stats.totals.total_prompt_tokens)} />
+            <StatTile label="输出令牌" value={fmtTokensNum(stats.totals.total_completion_tokens)} />
             <StatTile label="缓存命中" value={fmtTokensNum(stats.totals.total_cached_tokens)} />
             <StatTile label="缓存写入" value={fmtTokensNum(stats.totals.total_cache_creation_tokens)} />
             <StatTile label="缓存命中率" value={cacheHitRate(stats.totals.total_cached_tokens, stats.totals.total_prompt_tokens)} />
@@ -173,8 +173,8 @@ export default function Logs({ keys, clientKeys }: Props) {
             <span>账号</span>
             <span>模型</span>
             <span>调用</span>
-            <span>首字 / 总耗时</span>
-            <span>输入/输出 · 缓存读/写</span>
+            <span>耗时</span>
+            <span>令牌用量</span>
           </div>
           {rows.map((r) => <LogRow key={r.id} log={r} />)}
         </div>
@@ -200,12 +200,36 @@ function LogRow({ log }: { log: RequestLog }) {
         <span className="log-cell log-name">{log.route_key_name ?? '—'}</span>
         <span className="log-cell log-model">{log.model ?? '—'}</span>
         <span className="log-cell log-path"><span className="log-method">{log.method}</span>{log.path}</span>
-        <span className="log-cell log-latency">
-          {log.stream
-            ? `${log.first_token_ms === null ? '—' : `${log.first_token_ms}ms`} / ${log.latency_ms}ms`
-            : `${log.latency_ms}ms`}
+        <span className="log-cell log-metrics log-timing" title={timingTitle(log)}>
+          {log.stream && (
+            <span className="log-metric">
+              <span className="log-metric-label">首字</span>
+              <strong>{formatDuration(log.first_token_ms)}</strong>
+            </span>
+          )}
+          <span className="log-metric">
+            <span className="log-metric-label">{log.stream ? '总耗时' : '耗时'}</span>
+            <strong>{formatDuration(log.latency_ms)}</strong>
+          </span>
         </span>
-        <span className="log-cell log-tokens" title={fmtTokens(log)}>{fmtTokens(log)}</span>
+        <span className="log-cell log-metrics log-token-metrics" title={tokenTitle(log)}>
+          <span className="log-metric">
+            <span className="log-metric-label">输入</span>
+            <strong>{formatCount(log.prompt_tokens)}</strong>
+            <span className="log-metric-separator" />
+            <span className="log-metric-label">输出</span>
+            <strong>{formatCount(log.completion_tokens)}</strong>
+          </span>
+          {(log.cached_tokens !== null || log.cache_creation_tokens !== null) && (
+            <span className="log-metric cache">
+              <span className="log-metric-label">缓存读</span>
+              <strong>{formatCount(log.cached_tokens)}</strong>
+              <span className="log-metric-separator" />
+              <span className="log-metric-label">写</span>
+              <strong>{formatCount(log.cache_creation_tokens)}</strong>
+            </span>
+          )}
+        </span>
       </div>
       {open && hasDetail && (
         <div className="log-detail">
@@ -217,14 +241,32 @@ function LogRow({ log }: { log: RequestLog }) {
   )
 }
 
-function fmtTokens(log: RequestLog) {
-  if (log.prompt_tokens === null && log.completion_tokens === null) return '—'
-  const p = log.prompt_tokens ?? 0
-  const c = log.completion_tokens ?? 0
-  const cache = log.cached_tokens ?? 0
-  const created = log.cache_creation_tokens ?? 0
-  const cacheText = cache > 0 || created > 0 ? ` · 缓存 ${cache}/${created}` : ''
-  return `${p}/${c}${cacheText}`
+function formatDuration(ms: number | null) {
+  if (ms === null) return '—'
+  if (ms < 1000) return `${ms}ms`
+  if (ms < 10_000) return `${(ms / 1000).toFixed(2)}s`
+  return `${(ms / 1000).toFixed(1)}s`
+}
+
+function formatCount(value: number | null) {
+  if (value === null) return '—'
+  return fmtTokensNum(value)
+}
+
+function timingTitle(log: RequestLog) {
+  return log.stream
+    ? `首字耗时：${log.first_token_ms === null ? '未记录' : `${log.first_token_ms.toLocaleString()} ms`}\n总耗时：${log.latency_ms.toLocaleString()} ms`
+    : `总耗时：${log.latency_ms.toLocaleString()} ms`
+}
+
+function tokenTitle(log: RequestLog) {
+  if (log.prompt_tokens === null && log.completion_tokens === null) return '未记录令牌用量'
+  return [
+    `输入：${(log.prompt_tokens ?? 0).toLocaleString()}`,
+    `输出：${(log.completion_tokens ?? 0).toLocaleString()}`,
+    `缓存读：${(log.cached_tokens ?? 0).toLocaleString()}`,
+    `缓存写：${(log.cache_creation_tokens ?? 0).toLocaleString()}`,
+  ].join('\n')
 }
 
 function formatTime(seconds: number) {

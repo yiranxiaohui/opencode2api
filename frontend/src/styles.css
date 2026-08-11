@@ -528,7 +528,7 @@ select.input { appearance: none; }
 }
 .log-row {
   display: grid;
-  grid-template-columns: 150px 74px minmax(0, 0.9fr) minmax(0, 0.9fr) minmax(0, 1.1fr) minmax(0, 1.5fr) 74px 150px;
+  grid-template-columns: 145px 70px minmax(90px, 0.8fr) minmax(90px, 0.8fr) minmax(130px, 1.1fr) minmax(130px, 1.3fr) 130px 180px;
   align-items: center;
   gap: 12px;
   padding: 9px 16px;
@@ -564,8 +564,14 @@ select.input { appearance: none; }
 .log-model { font-family: var(--mono); font-size: 11.5px; color: var(--text); }
 .log-path { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
 .log-method { color: var(--accent); font-weight: 600; margin-right: 6px; }
-.log-latency { font-family: var(--mono); font-size: 11.5px; color: var(--muted); text-align: right; }
-.log-tokens { font-family: var(--mono); font-size: 11px; color: var(--faint); text-align: right; }
+.log-metrics { display: flex; flex-direction: column; align-items: stretch; gap: 3px; overflow: visible; }
+.log-metric { display: grid; grid-template-columns: auto 1fr auto; align-items: baseline; gap: 5px; white-space: nowrap; }
+.log-metric-label { color: var(--faint); font-size: 9.5px; }
+.log-metric strong { color: var(--muted); font: 600 11px var(--mono); text-align: right; }
+.log-token-metrics .log-metric { grid-template-columns: auto minmax(28px, 1fr) 1px auto minmax(28px, 1fr); }
+.log-token-metrics .log-metric strong { color: var(--text); }
+.log-token-metrics .log-metric.cache strong { color: var(--accent); }
+.log-metric-separator { width: 1px; height: 9px; background: var(--border-strong); align-self: center; }
 
 .log-detail {
   grid-column: 1 / -1;
@@ -626,30 +632,16 @@ select.input { appearance: none; }
   .log-stat-cols { grid-template-columns: 1fr; }
 }
 
-@media (max-width: 1100px) {
-  .log-row { grid-template-columns: 130px 70px minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1.4fr) 70px 130px; }
-  .log-row > :nth-child(2) { grid-column: 2 / 3; }
+@media (max-width: 1200px) {
+  .log-row { grid-template-columns: 135px 68px minmax(85px, .8fr) minmax(125px, 1fr) minmax(120px, 1fr) 125px 175px; }
   .log-row > :nth-child(4) { display: none; }
   .log-row-head > :nth-child(4) { display: none; }
-  .log-row > :nth-child(6) { grid-column: 3 / 7; }
-  .log-row-head > :nth-child(6) { grid-column: 3 / 7; }
-  .log-row > :nth-child(8) { grid-column: 7 / 8; grid-row: 1; }
-  .log-row-head > :nth-child(8) { grid-column: 7 / 8; }
 }
-@media (max-width: 720px) {
-  .log-row { grid-template-columns: 96px 62px minmax(0, 1fr) 62px 76px; }
-  .log-row > :nth-child(2) { grid-column: 2 / 3; }
+@media (max-width: 850px) {
+  .log-table { overflow-x: auto; }
+  .log-row { min-width: 720px; grid-template-columns: 125px 62px minmax(120px, 1fr) minmax(115px, 1fr) 120px 170px; }
   .log-row > :nth-child(3) { display: none; }
-  .log-row > :nth-child(4) { display: none; }
   .log-row-head > :nth-child(3) { display: none; }
-  .log-row > :nth-child(5) { grid-column: 3 / 6; }
-  .log-row-head > :nth-child(5) { grid-column: 3 / 6; }
-  .log-row > :nth-child(6) { grid-column: 1 / 6; grid-row: 2; padding-left: 0; }
-  .log-row-head > :nth-child(6) { display: none; }
-  .log-row > :nth-child(7) { grid-column: 3 / 4; grid-row: 1; }
-  .log-row-head > :nth-child(7) { display: none; }
-  .log-row > :nth-child(8) { grid-column: 5 / 6; grid-row: 1; }
-  .log-row-head > :nth-child(8) { display: none; }
 }
 
 /* Reduced motion */
