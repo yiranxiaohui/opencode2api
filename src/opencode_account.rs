@@ -82,7 +82,10 @@ async fn get(client: &Client, url: &str, cookie: &str) -> Result<reqwest::Respon
         .map_err(|e| ApiError::BadRequest(format!("连接 OpenCode 失败: {e}")))
 }
 
-pub async fn discover(client: &Client, cookie: &str) -> Result<(String, String), ApiError> {
+pub async fn discover(
+    client: &Client,
+    cookie: &str,
+) -> Result<(String, String, Option<String>), ApiError> {
     let response = get(client, &format!("{ORIGIN}/auth"), cookie).await?;
     let location = response
         .headers()
@@ -116,7 +119,20 @@ pub async fn discover(client: &Client, cookie: &str) -> Result<(String, String),
         .find(&body)
         .map(|m| m.as_str().to_string())
         .ok_or_else(|| ApiError::BadRequest("账号中未找到可用 API Key".into()))?;
-    Ok((workspace, api_key))
+    let email = extract_email(&body);
+    Ok((workspace, api_key, email))
+}
+
+fn extract_email(body: &str) -> Option<String> {
+    let decoded = body.replace("&quot;", "\"").replace("\\\"", "\"");
+    let labelled = Regex::new(r#"(?i)["']email["']\s*:\s*["']([^"'<>\s]+@[^"'<>\s]+)["']"#).ok()?;
+    if let Some(value) = labelled.captures(&decoded).and_then(|c| c.get(1)) {
+        return Some(value.as_str().to_lowercase());
+    }
+    Regex::new(r#"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b"#)
+        .ok()?
+        .find(&decoded)
+        .map(|m| m.as_str().to_lowercase())
 }
 
 async fn query(
@@ -261,5 +277,12 @@ mod tests {
         )
         .unwrap();
         assert_eq!(w.remaining_percent, 62.5);
+    }
+    #[test]
+    fn extracts_email_from_serialized_session() {
+        assert_eq!(
+            extract_email(r#"{\"email\":\"User@Example.com\"}"#).as_deref(),
+            Some("user@example.com")
+        );
     }
 }
