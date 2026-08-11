@@ -475,6 +475,9 @@ pub(crate) const QUOTA_KEYWORDS: &[&str] = &[
     "余额",
 ];
 
+/// How long an account that returned a quota-exhaustion error is skipped.
+pub(crate) const QUOTA_COOLDOWN_SECS: i64 = 900;
+
 /// Classify an upstream non-success response as quota exhaustion. HTTP 402 is a
 /// hard signal; other 4xx bodies are scanned in the OpenAI error fields only.
 /// Conservative by design: plain rate limiting (`rate_limit_exceeded`), missing
