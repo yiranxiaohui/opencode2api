@@ -479,6 +479,10 @@ pub(crate) const QUOTA_KEYWORDS: &[&str] = &[
 /// hard signal; other 4xx bodies are scanned in the OpenAI error fields only.
 /// Conservative by design: plain rate limiting (`rate_limit_exceeded`), missing
 /// models, and 5xx must never trigger failover.
+// This classifier is not yet reachable from production code; the automatic
+// account-failover loop (Tasks 5/6) will call `is_quota_error` (which in turn
+// reads `QUOTA_KEYWORDS`), so silence the dead-code warning until then.
+#[allow(dead_code)]
 pub(crate) fn is_quota_error(status: StatusCode, body: &[u8]) -> bool {
     if status == StatusCode::PAYMENT_REQUIRED {
         return true;
