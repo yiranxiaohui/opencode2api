@@ -10,7 +10,7 @@ API Key 使用 **登录密码派生密钥 AES-256-GCM 加密** 后存于 SQLite�
 
 - **账号管理**：增删改查、搜索、标签筛选、设置默认账号
 - **连通性测试**：一键请求 OpenCode 官方 `/models`，显示延迟与模型列表并缓存
-- **统一代理**：`POST /v1/chat/completions` 等，SSE 流式原样透传；默认在支持请求模型的账号池中轮询负载均衡
+- **统一代理**：`POST /v1/chat/completions` 等，SSE 流式原样透传；使用会话粘性哈希在支持请求模型的账号池中负载均衡，避免连续对话切换账号导致缓存未命中
 - **访问密钥**：为调用代理的客户端自动生成独立 API Key，可随时撤销
 - **代理池**：管理一组 HTTP / HTTPS / SOCKS5 出口转发代理，每个账号可挂一个；网关转发、连通性测试、`/v1/models` 聚合均走该代理
 - **多协议模型路由**：同一账号可同时使用 Chat Completions、Responses 和 Anthropic Messages 模型；原生 Messages 模型直接透传，其余模型仍支持 Messages → Chat Completions 兼容转换
@@ -52,10 +52,11 @@ cargo build --release
 ```bash
 curl -N http://127.0.0.1:8787/v1/chat/completions \
   -H "Content-Type: application/json" \
+  -H "X-Session-Id: conversation-123" \
   -d '{"model":"deepseek-chat","stream":true,"messages":[{"role":"user","content":"你好"}]}'
 ```
 
-> 默认按 round-robin 在支持该模型的账号间轮询；模型缓存未命中时在全部账号间轮询。
+> 建议为每段对话传入稳定且唯一的 `X-Session-Id`（也兼容 `X-Conversation-Id`）。同一会话和模型始终映射到同一账号，不同会话则分散到账号池。未传会话 ID 时，以客户端访问密钥和模型作为粘性键；模型缓存未命中时在全部账号中执行相同的粘性选择。
 > `X-Key-Id` / `X-Key-Name` 仅作为需要固定账号时的显式覆盖。SDK 用法示例：
 
 ```python
@@ -68,6 +69,7 @@ client = OpenAI(
 print(client.chat.completions.create(
     model="deepseek-chat",
     messages=[{"role": "user", "content": "你好"}],
+    extra_headers={"X-Session-Id": "conversation-123"},
 ))
 ```
 

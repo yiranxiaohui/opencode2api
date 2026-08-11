@@ -1,4 +1,3 @@
-use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 use axum::body::Body;
@@ -7,13 +6,14 @@ use axum::http::{HeaderMap, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 
 use crate::error::ApiError;
 use crate::middleware::Unlocked;
 use crate::routes::logs::{self, LogInput};
 use crate::state::AppState;
 
-/// Unified OpenAI-compatible gateway: forwards `/v1/*` to a round-robin key.
+/// Unified OpenAI-compatible gateway: forwards `/v1/*` to a sticky-session key.
 /// `X-Key-Id` / `X-Key-Name` remain available as explicit overrides.
 /// SSE (stream: true) is forwarded incrementally via `Body::from_stream`.
 pub async fn proxy(
@@ -81,8 +81,9 @@ pub(crate) async fn proxy_inner(
         .map_err(|e| ApiError::Internal(format!("read request body: {e}")))?
         .to_bytes();
     let (model, stream) = request_meta(&body_bytes);
+    let affinity = affinity_key(headers, &client.id, model.as_deref());
 
-    let row = match resolve_target(&st, headers, model.as_deref()).await {
+    let row = match resolve_target(&st, headers, model.as_deref(), &affinity).await {
         Ok(row) => row,
         Err(e) => {
             logs::record_failure(&st, &client, None, &method_str, path, 0, &e);
@@ -349,6 +350,7 @@ pub(crate) async fn resolve_target(
     st: &AppState,
     headers: &HeaderMap,
     model: Option<&str>,
+    affinity: &str,
 ) -> Result<crate::db::KeyRow, ApiError> {
     if let Some(id) = header_str(headers, "x-key-id") {
         if let Some(row) = st.db.get_key(id)? {
@@ -370,8 +372,43 @@ pub(crate) async fn resolve_target(
         return Err(ApiError::BadRequest("no account configured".into()));
     }
 
-    let cursor = st.account_cursor.fetch_add(1, Ordering::Relaxed);
-    Ok(candidates[(cursor % candidates.len() as u64) as usize].clone())
+    Ok(select_sticky_account(&candidates, affinity)
+        .expect("non-empty candidates")
+        .clone())
+}
+
+/// Build a stable routing key. Explicit session headers allow one client to
+/// spread independent conversations across accounts while keeping every turn
+/// of a conversation on the same account. Without one, client + model remains
+/// sticky, favoring cache reuse over per-request distribution.
+pub(crate) fn affinity_key(headers: &HeaderMap, client_id: &str, model: Option<&str>) -> String {
+    let session = header_str(headers, "x-session-id")
+        .or_else(|| header_str(headers, "x-conversation-id"))
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    format!(
+        "client:{}\0model:{}\0session:{}",
+        client_id,
+        model.unwrap_or_default(),
+        session.unwrap_or_default()
+    )
+}
+
+/// Highest-random-weight (Rendezvous) hashing provides deterministic affinity
+/// independent of database ordering and minimizes remapping when accounts are
+/// added to or removed from the eligible model pool.
+fn select_sticky_account<'a>(
+    candidates: &'a [crate::db::KeyRow],
+    affinity: &str,
+) -> Option<&'a crate::db::KeyRow> {
+    candidates.iter().max_by_key(|row| {
+        let mut hasher = Sha256::new();
+        hasher.update(affinity.as_bytes());
+        hasher.update([0]);
+        hasher.update(row.id.as_bytes());
+        let digest = hasher.finalize();
+        u64::from_be_bytes(digest[..8].try_into().expect("SHA-256 prefix"))
+    })
 }
 
 /// Prefer accounts whose refreshed model cache advertises the requested model.
@@ -399,8 +436,8 @@ fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
 #[cfg(test)]
 mod tests {
     use super::{
-        candidates_for_model, credential_candidates, native_endpoint_for_model,
-        should_forward_stream,
+        affinity_key, candidates_for_model, credential_candidates, native_endpoint_for_model,
+        select_sticky_account, should_forward_stream,
     };
     use crate::db::KeyRow;
     use crate::models::ModelInfo;
@@ -484,6 +521,44 @@ mod tests {
         assert_eq!(
             credential_candidates(&headers),
             vec!["stale-key", "valid-key"]
+        );
+    }
+
+    #[test]
+    fn sticky_routing_is_stable_across_requests_and_candidate_order() {
+        let candidates = vec![
+            key("a", &["shared"]),
+            key("b", &["shared"]),
+            key("c", &["shared"]),
+        ];
+        let selected = select_sticky_account(&candidates, "client:model:session")
+            .unwrap()
+            .id
+            .clone();
+        let reversed = candidates.into_iter().rev().collect::<Vec<_>>();
+
+        assert_eq!(
+            select_sticky_account(&reversed, "client:model:session")
+                .unwrap()
+                .id,
+            selected
+        );
+    }
+
+    #[test]
+    fn explicit_session_id_changes_the_affinity_key() {
+        let mut first = HeaderMap::new();
+        first.insert("x-session-id", "conversation-a".parse().unwrap());
+        let mut second = HeaderMap::new();
+        second.insert("x-conversation-id", "conversation-b".parse().unwrap());
+
+        assert_ne!(
+            affinity_key(&first, "client", Some("model")),
+            affinity_key(&second, "client", Some("model"))
+        );
+        assert_eq!(
+            affinity_key(&HeaderMap::new(), "client", Some("model")),
+            affinity_key(&HeaderMap::new(), "client", Some("model"))
         );
     }
 }

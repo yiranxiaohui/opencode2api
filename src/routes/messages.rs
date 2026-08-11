@@ -62,7 +62,8 @@ async fn messages_inner(
         )
         .await;
     }
-    let row = match super::proxy::resolve_target(&st, headers, Some(&model)).await {
+    let affinity = super::proxy::affinity_key(headers, &client_key.id, Some(&model));
+    let row = match super::proxy::resolve_target(&st, headers, Some(&model), &affinity).await {
         Ok(row) => row,
         Err(e) => {
             logs::record_failure(&st, &client_key, None, "POST", "/messages", 0, &e);
