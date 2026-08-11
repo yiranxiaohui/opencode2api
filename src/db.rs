@@ -4,7 +4,7 @@ use std::sync::Mutex;
 use rusqlite::{Connection, OptionalExtension, params, params_from_iter};
 
 use crate::error::ApiError;
-use crate::models::{LogStatsGroup, LogStatsTotals, ModelInfo, now_secs};
+use crate::models::{AccountUsage, LogStatsGroup, LogStatsTotals, ModelInfo, now_secs};
 
 const COLUMNS: &str = "id, name, base_url, api_key_enc, tags, notes, model_cache, is_default, created_at, updated_at, proxy_id, is_enabled, cookie_enc, workspace_id";
 
@@ -12,7 +12,8 @@ const COLUMNS: &str = "id, name, base_url, api_key_enc, tags, notes, model_cache
 /// (`id`, `name`, `created_at`, `updated_at` exist in both tables).
 const KEY_SELECT: &str = "api_keys.id, api_keys.name, api_keys.base_url, api_keys.api_key_enc, api_keys.tags, \
      api_keys.notes, api_keys.model_cache, api_keys.is_default, api_keys.created_at, \
-     api_keys.updated_at, api_keys.proxy_id, api_keys.is_enabled, api_keys.cookie_enc, api_keys.workspace_id";
+     api_keys.updated_at, api_keys.proxy_id, api_keys.is_enabled, api_keys.cookie_enc, api_keys.workspace_id, \
+     api_keys.usage_cache";
 
 /// Fields that can be written for a key. `api_key_enc` is the already-encrypted blob.
 #[derive(Debug, Clone)]
@@ -47,6 +48,7 @@ pub struct KeyRow {
     pub proxy_name: Option<String>,
     pub cookie_enc: Option<String>,
     pub workspace_id: Option<String>,
+    pub usage_cache: Option<AccountUsage>,
 }
 
 /// Fields that can be written for a proxy. `url_enc` is the already-encrypted URL.
@@ -111,6 +113,7 @@ pub struct LogFilter {
 fn row_to_key(r: &rusqlite::Row) -> rusqlite::Result<KeyRow> {
     let tags_json: String = r.get(4)?;
     let models_json: String = r.get(6)?;
+    let usage_json: Option<String> = r.get(14)?;
     Ok(KeyRow {
         id: r.get(0)?,
         name: r.get(1)?,
@@ -126,7 +129,8 @@ fn row_to_key(r: &rusqlite::Row) -> rusqlite::Result<KeyRow> {
         is_enabled: r.get::<_, i64>(11)? != 0,
         cookie_enc: r.get(12)?,
         workspace_id: r.get(13)?,
-        proxy_name: r.get(14)?,
+        usage_cache: usage_json.and_then(|value| serde_json::from_str(&value).ok()),
+        proxy_name: r.get(15)?,
     })
 }
 
@@ -526,6 +530,15 @@ impl Db {
         conn.execute(
             "UPDATE api_keys SET model_cache = ?1, updated_at = ?2 WHERE id = ?3",
             params![serde_json::to_string(models)?, now, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_usage_cache(&self, id: &str, usage: &AccountUsage) -> Result<(), ApiError> {
+        let conn = self.0.lock().unwrap();
+        conn.execute(
+            "UPDATE api_keys SET usage_cache = ?1 WHERE id = ?2",
+            params![serde_json::to_string(usage)?, id],
         )?;
         Ok(())
     }

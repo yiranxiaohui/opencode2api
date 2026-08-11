@@ -250,9 +250,9 @@ pub async fn usage(
         .ok_or_else(|| ApiError::Internal("账号缺少 workspace".into()))?;
     let cookie = st.decrypt_secret(cookie_enc).await?;
     let client = st.client_for_key(&row).await?;
-    Ok(Json(
-        crate::opencode_account::usage(&client, &cookie, workspace).await?,
-    ))
+    let usage = crate::opencode_account::usage(&client, &cookie, workspace).await?;
+    st.db.set_usage_cache(&id, &usage)?;
+    Ok(Json(usage))
 }
 
 pub async fn delete(

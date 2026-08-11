@@ -44,6 +44,7 @@ pub struct KeySummary {
     pub proxy_name: Option<String>,
     pub has_cookie: bool,
     pub workspace_id: Option<String>,
+    pub usage_cache: Option<AccountUsage>,
 }
 
 impl KeySummary {
@@ -62,6 +63,7 @@ impl KeySummary {
             proxy_name: r.proxy_name.clone(),
             has_cookie: r.cookie_enc.is_some(),
             workspace_id: r.workspace_id.clone(),
+            usage_cache: r.usage_cache.clone(),
         }
     }
 }
@@ -117,7 +119,7 @@ pub struct CookieImportInput {
     pub proxy_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageWindow {
     pub usage_percent: f64,
     pub remaining_percent: f64,
@@ -125,7 +127,7 @@ pub struct UsageWindow {
     pub status: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccountUsage {
     pub plan_name: String,
     pub plan_status: String,

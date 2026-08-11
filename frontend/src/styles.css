@@ -240,6 +240,14 @@ select.input { appearance: none; }
 .usage-pills { display: flex; gap: 4px; min-width: 0; }
 .usage-pills span { font-family: var(--mono); font-size: 10px; color: var(--ok); border: 1px solid rgba(92,184,132,.28); background: var(--ok-soft); border-radius: 4px; padding: 2px 5px; white-space: nowrap; }
 .usage-error { color: var(--err); font-size: 11px; }
+.usage-query {
+  display: inline-flex; align-items: center; gap: 4px; flex: none;
+  color: var(--accent); background: transparent; border: 0; padding: 4px 6px;
+  font: inherit; font-size: 11px; cursor: pointer; border-radius: 4px;
+}
+.usage-query:hover { background: var(--accent-soft); }
+.usage-query:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.usage-query:disabled { color: var(--faint); cursor: wait; }
 
 .tags { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
 .tag {

@@ -23,6 +23,7 @@ export interface KeySummary {
   proxy_name: string | null
   has_cookie: boolean
   workspace_id: string | null
+  usage_cache: AccountUsage | null
 }
 
 export interface KeyRecord extends KeySummary {
