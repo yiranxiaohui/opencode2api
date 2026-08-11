@@ -157,22 +157,39 @@ pub struct Usage {
 }
 
 pub fn usage_from_json(value: &Value) -> Option<Usage> {
-    let cache_read = value.pointer("/usage/cache_read_input_tokens").and_then(Value::as_i64);
-    let cache_creation = value.pointer("/usage/cache_creation_input_tokens").and_then(Value::as_i64);
+    let cache_read = value
+        .pointer("/usage/cache_read_input_tokens")
+        .and_then(Value::as_i64);
+    let cache_creation = value
+        .pointer("/usage/cache_creation_input_tokens")
+        .and_then(Value::as_i64);
     let input = value.pointer("/usage/input_tokens").and_then(Value::as_i64);
     // Anthropic reports uncached input, cache reads and cache writes separately.
     // Normalize prompt to the total input footprint so hit-rate calculations
     // have the same denominator as OpenAI's prompt/input token total.
-    let anthropic_prompt = input.map(|tokens| {
-        tokens + cache_read.unwrap_or(0) + cache_creation.unwrap_or(0)
-    });
+    let anthropic_prompt =
+        input.map(|tokens| tokens + cache_read.unwrap_or(0) + cache_creation.unwrap_or(0));
     let usage = Usage {
-        prompt: value.pointer("/usage/prompt_tokens").and_then(Value::as_i64)
+        prompt: value
+            .pointer("/usage/prompt_tokens")
+            .and_then(Value::as_i64)
             .or(anthropic_prompt),
-        completion: value.pointer("/usage/completion_tokens").and_then(Value::as_i64)
-            .or_else(|| value.pointer("/usage/output_tokens").and_then(Value::as_i64)),
-        cached: value.pointer("/usage/prompt_tokens_details/cached_tokens").and_then(Value::as_i64)
-            .or_else(|| value.pointer("/usage/input_tokens_details/cached_tokens").and_then(Value::as_i64))
+        completion: value
+            .pointer("/usage/completion_tokens")
+            .and_then(Value::as_i64)
+            .or_else(|| {
+                value
+                    .pointer("/usage/output_tokens")
+                    .and_then(Value::as_i64)
+            }),
+        cached: value
+            .pointer("/usage/prompt_tokens_details/cached_tokens")
+            .and_then(Value::as_i64)
+            .or_else(|| {
+                value
+                    .pointer("/usage/input_tokens_details/cached_tokens")
+                    .and_then(Value::as_i64)
+            })
             .or(cache_read),
         cache_creation,
     };
