@@ -1,5 +1,6 @@
 use regex::Regex;
 use reqwest::{Client, header};
+use std::time::Duration;
 
 use crate::error::ApiError;
 use crate::models::{AccountUsage, UsageWindow, now_secs};
@@ -156,6 +157,7 @@ async fn query(
         )
         .header("x-server-id", id)
         .header("x-server-instance", "server-fn:0")
+        .timeout(Duration::from_secs(30))
         .send()
         .await
         .map_err(|e| ApiError::BadRequest(format!("查询额度失败: {e}")))?;

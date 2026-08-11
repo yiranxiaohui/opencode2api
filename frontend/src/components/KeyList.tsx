@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react'
-import { useQueries } from '@tanstack/react-query'
+import { useQueryClient } from '@tanstack/react-query'
 import { keysApi } from '../api/keys'
 import type { KeySummary } from '../api/types'
-import { BoltIcon, EditIcon, PowerIcon, SearchIcon, TrashIcon } from './icons'
+import { keysQueryKey } from '../hooks/useKeys'
+import { toast } from '../lib/toast'
+import { BoltIcon, EditIcon, PowerIcon, RefreshIcon, SearchIcon, TrashIcon } from './icons'
 
 interface Props {
   keys: KeySummary[]
@@ -17,15 +19,27 @@ interface Props {
 export default function KeyList({ keys, selectedId, onOpen, onTest, onEdit, onDelete, onSetEnabled }: Props) {
   const [query, setQuery] = useState('')
   const [activeTag, setActiveTag] = useState<string | null>(null)
-  const usageQueries = useQueries({ queries: keys.map((key) => ({
-    queryKey: ['account-usage', key.id],
-    queryFn: () => keysApi.usage(key.id),
-    enabled: key.has_cookie && key.is_enabled,
-    staleTime: 60_000,
-    refetchInterval: 5 * 60_000,
-    retry: 1,
-  })) })
-  const usageById = new Map(keys.map((key, index) => [key.id, usageQueries[index]]))
+  const [queryingIds, setQueryingIds] = useState<Set<string>>(() => new Set())
+  const queryClient = useQueryClient()
+
+  const loadUsage = async (key: KeySummary) => {
+    setQueryingIds((current) => new Set(current).add(key.id))
+    try {
+      const usage = await keysApi.usage(key.id)
+      queryClient.setQueryData<KeySummary[]>(keysQueryKey, (current) =>
+        current?.map((item) => item.id === key.id ? { ...item, usage_cache: usage } : item),
+      )
+      toast(`${key.name} 额度已更新`, 'ok')
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '额度查询失败', 'err')
+    } finally {
+      setQueryingIds((current) => {
+        const next = new Set(current)
+        next.delete(key.id)
+        return next
+      })
+    }
+  }
 
   const allTags = useMemo(() => {
     const counts = new Map<string, number>()
@@ -82,15 +96,18 @@ export default function KeyList({ keys, selectedId, onOpen, onTest, onEdit, onDe
             <p>{keys.length === 0 ? '还没有任何账号' : '没有匹配的结果'}</p>
           </div>
         )}
-        {filtered.map((k) => (
-          <div
-            key={k.id}
-            className={`key-row ${selectedId === k.id ? 'selected' : ''} ${!k.is_enabled ? 'disabled' : ''}`}
-            tabIndex={0}
-            role="button"
-            onClick={() => onOpen(k)}
-            onKeyDown={(e) => e.key === 'Enter' && onOpen(k)}
-          >
+        {filtered.map((k) => {
+          const usage = k.usage_cache
+          const isQuerying = queryingIds.has(k.id)
+          return (
+            <div
+              key={k.id}
+              className={`key-row ${selectedId === k.id ? 'selected' : ''} ${!k.is_enabled ? 'disabled' : ''}`}
+              tabIndex={0}
+              role="button"
+              onClick={() => onOpen(k)}
+              onKeyDown={(e) => e.key === 'Enter' && onOpen(k)}
+            >
             <span className={`led ${k.is_enabled ? 'ok' : ''}`} title={k.is_enabled ? '已启用' : '已禁用'} />
             <div className="key-name">
               <span className="nm">{k.name}</span>
@@ -99,16 +116,25 @@ export default function KeyList({ keys, selectedId, onOpen, onTest, onEdit, onDe
             </div>
             <div className="key-usage">
               {!k.has_cookie && <span className="key-url">API Key 账号</span>}
-              {k.has_cookie && usageById.get(k.id)?.isPending && <span className="key-url">正在查询额度…</span>}
-              {k.has_cookie && usageById.get(k.id)?.isError && <span className="usage-error">额度查询失败</span>}
-              {usageById.get(k.id)?.data && <>
-                <span className="plan-name">{usageById.get(k.id)!.data!.plan_name}</span>
+              {k.has_cookie && usage && <>
+                <span className="plan-name" title={`缓存于 ${new Date(usage.fetched_at * 1000).toLocaleString()}`}>{usage.plan_name}</span>
                 <div className="usage-pills">
-                  {usageById.get(k.id)!.data!.rolling && <span>滚 {usageById.get(k.id)!.data!.rolling!.remaining_percent.toFixed(0)}%</span>}
-                  {usageById.get(k.id)!.data!.weekly && <span>周 {usageById.get(k.id)!.data!.weekly!.remaining_percent.toFixed(0)}%</span>}
-                  {usageById.get(k.id)!.data!.monthly && <span>月 {usageById.get(k.id)!.data!.monthly!.remaining_percent.toFixed(0)}%</span>}
+                  {usage.rolling && <span>滚 {usage.rolling.remaining_percent.toFixed(0)}%</span>}
+                  {usage.weekly && <span>周 {usage.weekly.remaining_percent.toFixed(0)}%</span>}
+                  {usage.monthly && <span>月 {usage.monthly.remaining_percent.toFixed(0)}%</span>}
                 </div>
               </>}
+              {k.has_cookie && (
+                <button
+                  className="usage-query"
+                  disabled={isQuerying}
+                  title={usage ? '刷新额度缓存' : '查询额度'}
+                  onClick={(event) => { event.stopPropagation(); void loadUsage(k) }}
+                >
+                  {isQuerying && <RefreshIcon size={12} className="spin" />}
+                  {isQuerying ? '查询中…' : usage ? '刷新' : '查询额度'}
+                </button>
+              )}
             </div>
             <div className="tags">
               {k.tags.slice(0, 3).map((t) => (
@@ -138,8 +164,9 @@ export default function KeyList({ keys, selectedId, onOpen, onTest, onEdit, onDe
                 <TrashIcon size={13} />
               </button>
             </div>
-          </div>
-        ))}
+            </div>
+          )
+        })}
       </div>
     </>
   )

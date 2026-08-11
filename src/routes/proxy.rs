@@ -498,6 +498,7 @@ mod tests {
             proxy_name: None,
             cookie_enc: None,
             workspace_id: None,
+            usage_cache: None,
         }
     }
 
