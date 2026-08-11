@@ -8,20 +8,19 @@ import CookieImportModal from './components/CookieImportModal'
 import KeyFormModal from './components/KeyFormModal'
 import KeyList from './components/KeyList'
 import Logs from './components/Logs'
-import Chat from './components/Chat'
 import ClientKeys from './components/ClientKeys'
 import ProxyFormModal from './components/ProxyFormModal'
 import ProxyList from './components/ProxyList'
 import Settings from './components/Settings'
 import ToastHost from './components/ToastHost'
-import { ActivityIcon, ChatIcon, GatewayIcon, GearIcon, GlobeIcon, KeyIcon, PlusIcon, VaultIcon } from './components/icons'
+import { ActivityIcon, GatewayIcon, GearIcon, GlobeIcon, KeyIcon, PlusIcon, VaultIcon } from './components/icons'
 import { useKeys } from './hooks/useKeys'
 import { useProxies } from './hooks/useProxies'
 import { useSession } from './hooks/useSession'
 import { clientKeysApi } from './api/keys'
 import { toast } from './lib/toast'
 
-type Tab = 'keys' | 'chat' | 'logs' | 'proxies' | 'client-keys' | 'settings'
+type Tab = 'keys' | 'logs' | 'proxies' | 'client-keys' | 'settings'
 
 export default function App() {
   const session = useSession()
@@ -36,7 +35,7 @@ export default function App() {
   const [editingProxy, setEditingProxy] = useState<ProxyRecord | null>(null)
   const [pendingProxyDelete, setPendingProxyDelete] = useState<ProxyRecord | null>(null)
 
-  const { query, createKey, updateKey, deleteKey, setDefault, setEnabled, testKey, importItems, importCookie } = useKeys(
+  const { query, createKey, updateKey, deleteKey, setEnabled, testKey, importItems, importCookie } = useKeys(
     session.phase === 'unlocked',
   )
   const { query: proxiesQuery, createProxy, updateProxy, deleteProxy } = useProxies(
@@ -111,7 +110,6 @@ export default function App() {
   }
 
   const renderTab = () => {
-    if (tab === 'chat') return <Chat keys={keys.filter((key) => key.is_enabled)} />
     if (tab === 'logs') return <Logs keys={keys} clientKeys={clientKeys} />
     if (tab === 'client-keys') return <ClientKeys onKeysChange={setClientKeys} />
     if (tab === 'settings') return <Settings />
@@ -175,7 +173,6 @@ export default function App() {
             setFormOpen(true)
           }}
           onDelete={setPendingDelete}
-          onSetDefault={(id) => setDefault.mutate(id)}
           onSetEnabled={(id, enabled) => setEnabled.mutate({ id, enabled })}
         />
       </>
@@ -205,9 +202,6 @@ export default function App() {
         <button className={`nav-item ${tab === 'keys' ? 'active' : ''}`} onClick={() => setTab('keys')}>
           <KeyIcon /> 账号管理
         </button>
-        <button className={`nav-item ${tab === 'chat' ? 'active' : ''}`} onClick={() => setTab('chat')}>
-          <ChatIcon /> 对话
-        </button>
         <button className={`nav-item ${tab === 'logs' ? 'active' : ''}`} onClick={() => setTab('logs')}>
           <ActivityIcon /> 请求日志
         </button>
@@ -226,7 +220,6 @@ export default function App() {
         <div className="topbar">
           <div className="topbar-title">
             {tab === 'keys' && '账号管理'}
-            {tab === 'chat' && '对话'}
             {tab === 'logs' && '请求日志'}
             {tab === 'proxies' && '代理池'}
             {tab === 'client-keys' && '密钥管理'}
@@ -272,10 +265,6 @@ export default function App() {
             setFormOpen(true)
           }}
           onDelete={setPendingDelete}
-          onSetDefault={(id) => {
-            setDefault.mutate(id)
-            setDetail(null)
-          }}
           onSetEnabled={(id, enabled) => {
             setEnabled.mutate({ id, enabled })
             setDetail(null)

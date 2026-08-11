@@ -39,14 +39,6 @@ export function useKeys(enabled: boolean) {
     },
   })
 
-  const setDefault = useMutation({
-    mutationFn: keysApi.setDefault,
-    onSuccess: () => {
-      invalidate()
-      toast('已设为默认账号', 'ok')
-    },
-  })
-
   const setEnabled = useMutation({
     mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
       keysApi.setEnabled(id, enabled),
@@ -71,5 +63,5 @@ export function useKeys(enabled: boolean) {
     onSuccess: () => { invalidate(); toast('Cookie 账号导入成功', 'ok') },
   })
 
-  return { query, createKey, updateKey, deleteKey, setDefault, setEnabled, testKey, importItems, importCookie }
+  return { query, createKey, updateKey, deleteKey, setEnabled, testKey, importItems, importCookie }
 }
