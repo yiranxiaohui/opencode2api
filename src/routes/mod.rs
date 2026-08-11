@@ -40,11 +40,13 @@ pub fn build_router(state: AppState) -> Router {
         .route("/logs/stats", get(logs::stats))
         .route("/chat/{*path}", any(proxy::chat_proxy))
         .route("/keys", get(keys::list).post(keys::create))
+        .route("/keys/import-cookie", post(keys::import_cookie))
         .route(
             "/keys/{id}",
             get(keys::get_key).put(keys::update).delete(keys::delete),
         )
         .route("/keys/{id}/test", post(keys::test))
+        .route("/keys/{id}/usage", get(keys::usage))
         .route("/keys/{id}/set-default", post(keys::set_default))
         .route("/keys/{id}/set-enabled", post(keys::set_enabled))
         .route("/proxies", get(proxies::list).post(proxies::create))

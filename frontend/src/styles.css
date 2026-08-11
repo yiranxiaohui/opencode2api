@@ -166,6 +166,12 @@ a { color: var(--accent); }
 .input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .input::placeholder { color: var(--faint); }
 textarea.input { resize: vertical; min-height: 90px; font-family: var(--mono); font-size: 12.5px; line-height: 1.6; }
+.usage-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
+.usage-card { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; }
+.usage-card strong { font-size: 18px; }
+.usage-track { height: 5px; border-radius: 9px; background: var(--border); overflow: hidden; }
+.usage-track i { display: block; height: 100%; background: var(--accent); }
+@media (max-width: 680px) { .usage-grid { grid-template-columns: 1fr; } }
 select.input { appearance: none; }
 .mono-input { font-family: var(--mono); font-size: 12.5px; }
 

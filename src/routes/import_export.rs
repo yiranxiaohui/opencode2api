@@ -107,6 +107,8 @@ pub async fn import(
             is_default: false,
             is_enabled: item.is_enabled,
             proxy_id,
+            cookie_enc: None,
+            workspace_id: None,
         };
         if st.db.get_key_by_name(&data.name)?.is_some() {
             if st.db.update_key_by_name(&data.name, &data, now_secs())? {

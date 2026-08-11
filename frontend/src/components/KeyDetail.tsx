@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { keysApi } from '../api/keys'
-import type { KeySummary, TestResult } from '../api/types'
+import type { AccountUsage, KeySummary, TestResult } from '../api/types'
 import { toast } from '../lib/toast'
 import CopyButton from './CopyButton'
 import { BoltIcon, CheckIcon, EditIcon, EyeIcon, EyeOffIcon, PowerIcon, RefreshIcon, StarIcon, TrashIcon, XIcon } from './icons'
@@ -20,6 +20,8 @@ export default function KeyDetail({ summary, onClose, onEdit, onDelete, onSetDef
   const [testing, setTesting] = useState(false)
   const [test, setTest] = useState<TestResult | null>(null)
   const [loadErr, setLoadErr] = useState('')
+  const [usage, setUsage] = useState<AccountUsage | null>(null)
+  const [usageLoading, setUsageLoading] = useState(false)
 
   useEffect(() => {
     let alive = true
@@ -57,6 +59,8 @@ export default function KeyDetail({ summary, onClose, onEdit, onDelete, onSetDef
   const models = (record.model_cache as { id: string; owned_by?: string }[] | undefined) ?? []
   const lastTestModels = test?.ok ? test.models : null
   const shownModels = lastTestModels ?? models
+  const loadUsage = async () => { setUsageLoading(true); try { setUsage(await keysApi.usage(summary.id)) } catch (e) { toast(e instanceof Error ? e.message : '额度查询失败', 'err') } finally { setUsageLoading(false) } }
+  const money = (value: number | null) => value == null ? '—' : `$${(value / 100_000_000).toFixed(2)}`
 
   return (
     <div className="overlay" onClick={onClose}>
@@ -123,6 +127,8 @@ export default function KeyDetail({ summary, onClose, onEdit, onDelete, onSetDef
               )}
             </dd>
           </dl>
+
+          {summary.has_cookie && <div className="test-box"><div style={{display:'flex', alignItems:'center', justifyContent:'space-between'}}><div className="section-label" style={{margin:0}}>套餐与额度</div><button className="btn btn-sm" disabled={usageLoading} onClick={loadUsage}>{usageLoading ? '查询中…' : usage ? '刷新' : '查询额度'}</button></div>{usage && <><h3 style={{margin:'14px 0 4px'}}>{usage.plan_name}</h3><div className="small">状态 {usage.plan_status}{usage.region ? ` · ${usage.region}` : ''} · 余额 {money(usage.balance_microcents)}</div><div className="usage-grid">{([['滚动额度', usage.rolling], ['每周额度', usage.weekly], ['每月额度', usage.monthly]] as const).map(([label,w]) => w && <div className="usage-card" key={label}><span className="small">{label}</span><strong>{w.remaining_percent.toFixed(1)}%</strong><div className="usage-track"><i style={{width:`${Math.max(0,Math.min(100,w.remaining_percent))}%`}} /></div><span className="small">剩余 · {Math.ceil(w.reset_in_sec/3600)} 小时后重置</span></div>)}</div>{usage.monthly_limit_microcents != null && <div className="small" style={{marginTop:10}}>月度消费 {money(usage.monthly_usage_microcents)} / {money(usage.monthly_limit_microcents)}</div>}</>}</div>}
 
           <div className="test-box">
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

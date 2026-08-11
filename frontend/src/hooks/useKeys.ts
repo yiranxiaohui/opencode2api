@@ -66,5 +66,10 @@ export function useKeys(enabled: boolean) {
     },
   })
 
-  return { query, createKey, updateKey, deleteKey, setDefault, setEnabled, testKey, importItems }
+  const importCookie = useMutation({
+    mutationFn: keysApi.importCookie,
+    onSuccess: () => { invalidate(); toast('Cookie 账号导入成功', 'ok') },
+  })
+
+  return { query, createKey, updateKey, deleteKey, setDefault, setEnabled, testKey, importItems, importCookie }
 }

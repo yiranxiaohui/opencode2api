@@ -67,6 +67,18 @@ impl AppState {
         self.cached_proxy_client(&url)
     }
 
+    pub async fn client_for_proxy_id(&self, proxy_id: Option<&str>) -> Result<Client, ApiError> {
+        let Some(proxy_id) = proxy_id else {
+            return Ok(self.proxy_client.clone());
+        };
+        let proxy = self
+            .db
+            .get_proxy(proxy_id)?
+            .ok_or_else(|| ApiError::BadRequest("proxy not found".into()))?;
+        let url = self.decrypt_secret(&proxy.url_enc).await?;
+        self.cached_proxy_client(&url)
+    }
+
     /// Reuse a per-URL client when possible; otherwise build one with the same
     /// long-timeout settings as `proxy_client`.
     fn cached_proxy_client(&self, url: &str) -> Result<Client, ApiError> {

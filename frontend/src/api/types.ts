@@ -22,6 +22,8 @@ export interface KeySummary {
   updated_at: number
   proxy_id: string | null
   proxy_name: string | null
+  has_cookie: boolean
+  workspace_id: string | null
 }
 
 export interface KeyRecord extends KeySummary {
@@ -44,6 +46,14 @@ export interface TestResult {
   latency_ms: number | null
   models: ModelInfo[]
   error: string | null
+}
+
+export interface CookieImportInput { cookie: string; name?: string; proxy_id?: string | null }
+export interface UsageWindow { usage_percent: number; remaining_percent: number; reset_in_sec: number; status: string }
+export interface AccountUsage {
+  plan_name: string; plan_status: string; region: string | null
+  balance_microcents: number | null; monthly_limit_microcents: number | null; monthly_usage_microcents: number | null
+  rolling: UsageWindow | null; weekly: UsageWindow | null; monthly: UsageWindow | null; fetched_at: number
 }
 
 export interface ExportItem {

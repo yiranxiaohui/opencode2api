@@ -6,13 +6,13 @@ use rusqlite::{Connection, OptionalExtension, params, params_from_iter};
 use crate::error::ApiError;
 use crate::models::{LogStatsGroup, LogStatsTotals, ModelInfo, now_secs};
 
-const COLUMNS: &str = "id, name, base_url, api_key_enc, tags, notes, model_cache, is_default, created_at, updated_at, proxy_id, is_enabled";
+const COLUMNS: &str = "id, name, base_url, api_key_enc, tags, notes, model_cache, is_default, created_at, updated_at, proxy_id, is_enabled, cookie_enc, workspace_id";
 
 /// Qualify every `api_keys` column for queries that LEFT JOIN `proxies`
 /// (`id`, `name`, `created_at`, `updated_at` exist in both tables).
 const KEY_SELECT: &str = "api_keys.id, api_keys.name, api_keys.base_url, api_keys.api_key_enc, api_keys.tags, \
      api_keys.notes, api_keys.model_cache, api_keys.is_default, api_keys.created_at, \
-     api_keys.updated_at, api_keys.proxy_id, api_keys.is_enabled";
+     api_keys.updated_at, api_keys.proxy_id, api_keys.is_enabled, api_keys.cookie_enc, api_keys.workspace_id";
 
 /// Fields that can be written for a key. `api_key_enc` is the already-encrypted blob.
 #[derive(Debug, Clone)]
@@ -25,6 +25,8 @@ pub struct KeyData {
     pub is_default: bool,
     pub is_enabled: bool,
     pub proxy_id: Option<String>,
+    pub cookie_enc: Option<String>,
+    pub workspace_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -43,6 +45,8 @@ pub struct KeyRow {
     pub updated_at: i64,
     pub proxy_id: Option<String>,
     pub proxy_name: Option<String>,
+    pub cookie_enc: Option<String>,
+    pub workspace_id: Option<String>,
 }
 
 /// Fields that can be written for a proxy. `url_enc` is the already-encrypted URL.
@@ -120,7 +124,9 @@ fn row_to_key(r: &rusqlite::Row) -> rusqlite::Result<KeyRow> {
         updated_at: r.get(9)?,
         proxy_id: r.get(10)?,
         is_enabled: r.get::<_, i64>(11)? != 0,
-        proxy_name: r.get(12)?,
+        cookie_enc: r.get(12)?,
+        workspace_id: r.get(13)?,
+        proxy_name: r.get(14)?,
     })
 }
 
@@ -402,7 +408,7 @@ impl Db {
         }
         tx.execute(
             &format!(
-                "INSERT INTO api_keys ({COLUMNS}) VALUES (?1,?2,?3,?4,?5,?6,'[]',?7,?8,?8,?9,?10)"
+                "INSERT INTO api_keys ({COLUMNS}) VALUES (?1,?2,?3,?4,?5,?6,'[]',?7,?8,?8,?9,?10,?11,?12)"
             ),
             params![
                 id,
@@ -415,6 +421,8 @@ impl Db {
                 now,
                 data.proxy_id,
                 data.is_enabled as i64,
+                data.cookie_enc,
+                data.workspace_id,
             ],
         )?;
         tx.commit()?;

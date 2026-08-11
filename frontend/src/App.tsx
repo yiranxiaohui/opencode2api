@@ -4,6 +4,7 @@ import type { ClientApiKey, KeyInput, KeySummary, ProxyRecord } from './api/type
 import AuthScreen from './components/AuthScreen'
 import ImportExportBar from './components/ImportExportBar'
 import KeyDetail from './components/KeyDetail'
+import CookieImportModal from './components/CookieImportModal'
 import KeyFormModal from './components/KeyFormModal'
 import KeyList from './components/KeyList'
 import Logs from './components/Logs'
@@ -26,6 +27,7 @@ export default function App() {
   const session = useSession()
   const [tab, setTab] = useState<Tab>('keys')
   const [formOpen, setFormOpen] = useState(false)
+  const [cookieImportOpen, setCookieImportOpen] = useState(false)
   const [editing, setEditing] = useState<KeySummary | null>(null)
   const [detail, setDetail] = useState<KeySummary | null>(null)
   const [pendingDelete, setPendingDelete] = useState<KeySummary | null>(null)
@@ -34,7 +36,7 @@ export default function App() {
   const [editingProxy, setEditingProxy] = useState<ProxyRecord | null>(null)
   const [pendingProxyDelete, setPendingProxyDelete] = useState<ProxyRecord | null>(null)
 
-  const { query, createKey, updateKey, deleteKey, setDefault, setEnabled, testKey, importItems } = useKeys(
+  const { query, createKey, updateKey, deleteKey, setDefault, setEnabled, testKey, importItems, importCookie } = useKeys(
     session.phase === 'unlocked',
   )
   const { query: proxiesQuery, createProxy, updateProxy, deleteProxy } = useProxies(
@@ -151,6 +153,7 @@ export default function App() {
           </div>
           <div className="grow" />
           <ImportExportBar onImport={(items) => importItems.mutate(items)} />
+          <button className="btn" onClick={() => setCookieImportOpen(true)}>Cookie 导入</button>
           <button
             className="btn btn-primary"
             onClick={() => {
@@ -246,6 +249,7 @@ export default function App() {
           onSave={handleSave}
         />
       )}
+      {cookieImportOpen && <CookieImportModal proxies={proxies} busy={busy} onClose={() => setCookieImportOpen(false)} onSave={(input) => { setBusy(true); importCookie.mutate(input, { onSettled: () => setBusy(false), onSuccess: () => setCookieImportOpen(false) }) }} />}
 
       {proxyFormOpen && (
         <ProxyFormModal
