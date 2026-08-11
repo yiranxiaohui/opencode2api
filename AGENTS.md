@@ -31,3 +31,7 @@ Add focused unit tests for protocol conversion, usage parsing, encryption, and m
 ## Commit & Pull Request Guidelines
 
 Recent commits use short, imperative subjects such as `Add cache token usage to request logs`. Keep each commit scoped to one coherent change. Pull requests should explain behavior and migration impact, list commands run, link relevant issues, and include screenshots for visible UI changes. Never commit API keys, SQLite data, generated bundles, or proxy credentials.
+
+## Required Development Workflow
+
+For every code change, start from an up-to-date `master` and create a dedicated feature or fix branch. Implement and verify the change on that branch using the relevant formatting, lint, test, and build commands. Create a focused commit, merge the completed branch into local `master`, and push `master` to `origin`. Do not modify code directly on `master` unless the user explicitly requests an exception. At handoff, report the working branch, commit hash, checks run, merge result, and push status.
