@@ -1,0 +1,252 @@
+use serde::{Deserialize, Serialize};
+
+pub const OPENCODE_BASE_URL: &str = "https://opencode.ai/zen/go/v1";
+
+pub fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeyInput {
+    pub name: String,
+    /// Kept for backwards-compatible clients; OpenCode's official URL is used.
+    #[serde(default)]
+    pub base_url: Option<String>,
+    #[serde(default)]
+    pub api_key: Option<String>, // required on create, optional on update (keep existing)
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub notes: String,
+    #[serde(default)]
+    pub is_default: bool,
+    /// Attached forward proxy (HTTP/SOCKS5) from the pool, if any.
+    /// Outer `None` = field omitted (keep existing on update); inner `None` = explicitly no proxy.
+    #[serde(default)]
+    pub proxy_id: Option<Option<String>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct KeySummary {
+    pub id: String,
+    pub name: String,
+    pub base_url: String,
+    pub tags: Vec<String>,
+    pub notes: String,
+    pub is_default: bool,
+    pub model_count: usize,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub proxy_id: Option<String>,
+    pub proxy_name: Option<String>,
+}
+
+impl KeySummary {
+    pub fn from_row(r: &crate::db::KeyRow) -> Self {
+        KeySummary {
+            id: r.id.clone(),
+            name: r.name.clone(),
+            base_url: OPENCODE_BASE_URL.to_string(),
+            tags: r.tags.clone(),
+            notes: r.notes.clone(),
+            is_default: r.is_default,
+            model_count: r.model_cache.len(),
+            created_at: r.created_at,
+            updated_at: r.updated_at,
+            proxy_id: r.proxy_id.clone(),
+            proxy_name: r.proxy_name.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct KeyRecord {
+    #[serde(flatten)]
+    pub summary: KeySummary,
+    pub api_key: String,
+    pub model_cache: Vec<ModelInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelInfo {
+    pub id: String,
+    #[serde(default)]
+    pub owned_by: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExportItem {
+    pub name: String,
+    /// Accepted when importing old backups, but ignored by the gateway.
+    #[serde(default, skip_serializing)]
+    pub base_url: Option<String>,
+    pub api_key: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub notes: String,
+    /// Name of the attached proxy (matched by name on import).
+    #[serde(default)]
+    pub proxy: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProxyExport {
+    pub name: String,
+    pub url: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ExportPayload {
+    pub proxies: Vec<ProxyExport>,
+    pub items: Vec<ExportItem>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PasswordBody {
+    pub password: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ChangePasswordBody {
+    pub old_password: String,
+    pub new_password: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ProxyInput {
+    pub name: String,
+    pub url: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ProxyRecord {
+    pub id: String,
+    pub name: String,
+    pub url: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OkResponse {
+    pub ok: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct StatusResponse {
+    pub installed: bool,
+    pub unlocked: bool,
+    pub key_count: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TestResult {
+    pub ok: bool,
+    pub latency_ms: Option<u128>,
+    pub models: Vec<ModelInfo>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ImportResult {
+    pub imported: usize,
+    pub updated: usize,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClientKeyInput {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ClientKeySummary {
+    pub id: String,
+    pub name: String,
+    pub prefix: String,
+    pub created_at: i64,
+    pub last_used_at: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ClientKeyCreated {
+    #[serde(flatten)]
+    pub summary: ClientKeySummary,
+    pub api_key: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RequestLogRecord {
+    pub id: String,
+    pub created_at: i64,
+    pub client_key_id: Option<String>,
+    pub client_key_name: String,
+    pub route_key_id: Option<String>,
+    pub route_key_name: Option<String>,
+    pub method: String,
+    pub path: String,
+    pub model: Option<String>,
+    pub stream: bool,
+    pub status: u16,
+    pub latency_ms: i64,
+    pub first_token_ms: Option<i64>,
+    pub prompt_tokens: Option<i64>,
+    pub completion_tokens: Option<i64>,
+    pub error: Option<String>,
+}
+
+impl RequestLogRecord {
+    pub fn from_row(r: &crate::db::RequestLogRow) -> Self {
+        RequestLogRecord {
+            id: r.id.clone(),
+            created_at: r.created_at,
+            client_key_id: r.client_key_id.clone(),
+            client_key_name: r.client_key_name.clone(),
+            route_key_id: r.route_key_id.clone(),
+            route_key_name: r.route_key_name.clone(),
+            method: r.method.clone(),
+            path: r.path.clone(),
+            model: r.model.clone(),
+            stream: r.stream,
+            status: r.status as u16,
+            latency_ms: r.latency_ms,
+            first_token_ms: r.first_token_ms,
+            prompt_tokens: r.prompt_tokens,
+            completion_tokens: r.completion_tokens,
+            error: r.error.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct LogListResponse {
+    pub items: Vec<RequestLogRecord>,
+    pub total: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LogStatsTotals {
+    pub total_calls: i64,
+    pub total_prompt_tokens: i64,
+    pub total_completion_tokens: i64,
+    pub total_duration_ms: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LogStatsGroup {
+    pub name: String,
+    pub calls: i64,
+    pub prompt_tokens: i64,
+    pub completion_tokens: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LogStatsResponse {
+    pub totals: LogStatsTotals,
+    pub by_model: Vec<LogStatsGroup>,
+    pub by_client: Vec<LogStatsGroup>,
+}
