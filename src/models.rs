@@ -196,6 +196,8 @@ pub struct RequestLogRecord {
     pub first_token_ms: Option<i64>,
     pub prompt_tokens: Option<i64>,
     pub completion_tokens: Option<i64>,
+    pub cached_tokens: Option<i64>,
+    pub cache_creation_tokens: Option<i64>,
     pub error: Option<String>,
 }
 
@@ -217,6 +219,8 @@ impl RequestLogRecord {
             first_token_ms: r.first_token_ms,
             prompt_tokens: r.prompt_tokens,
             completion_tokens: r.completion_tokens,
+            cached_tokens: r.cached_tokens,
+            cache_creation_tokens: r.cache_creation_tokens,
             error: r.error.clone(),
         }
     }
@@ -233,6 +237,8 @@ pub struct LogStatsTotals {
     pub total_calls: i64,
     pub total_prompt_tokens: i64,
     pub total_completion_tokens: i64,
+    pub total_cached_tokens: i64,
+    pub total_cache_creation_tokens: i64,
     pub total_duration_ms: i64,
 }
 
@@ -242,6 +248,8 @@ pub struct LogStatsGroup {
     pub calls: i64,
     pub prompt_tokens: i64,
     pub completion_tokens: i64,
+    pub cached_tokens: i64,
+    pub cache_creation_tokens: i64,
 }
 
 #[derive(Debug, Serialize)]

@@ -162,6 +162,8 @@ pub(crate) async fn proxy_inner(
                 latency_ms,
                 prompt_tokens: None,
                 completion_tokens: None,
+                cached_tokens: None,
+                cache_creation_tokens: None,
                 error: None,
             },
         )
@@ -205,8 +207,10 @@ pub(crate) async fn proxy_inner(
             stream: false,
             status: status.as_u16(),
             latency_ms,
-            prompt_tokens: usage.and_then(|u| u.0),
-            completion_tokens: usage.and_then(|u| u.1),
+            prompt_tokens: usage.and_then(|u| u.prompt),
+            completion_tokens: usage.and_then(|u| u.completion),
+            cached_tokens: usage.and_then(|u| u.cached),
+            cache_creation_tokens: usage.and_then(|u| u.cache_creation),
             error,
         },
     );

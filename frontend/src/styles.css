@@ -528,7 +528,7 @@ select.input { appearance: none; }
 }
 .log-row {
   display: grid;
-  grid-template-columns: 150px 74px minmax(0, 0.9fr) minmax(0, 0.9fr) minmax(0, 1.1fr) minmax(0, 1.5fr) 74px 88px;
+  grid-template-columns: 150px 74px minmax(0, 0.9fr) minmax(0, 0.9fr) minmax(0, 1.1fr) minmax(0, 1.5fr) 74px 150px;
   align-items: center;
   gap: 12px;
   padding: 9px 16px;
@@ -627,7 +627,7 @@ select.input { appearance: none; }
 }
 
 @media (max-width: 1100px) {
-  .log-row { grid-template-columns: 130px 70px minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1.4fr) 70px 84px; }
+  .log-row { grid-template-columns: 130px 70px minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1.4fr) 70px 130px; }
   .log-row > :nth-child(2) { grid-column: 2 / 3; }
   .log-row > :nth-child(4) { display: none; }
   .log-row-head > :nth-child(4) { display: none; }

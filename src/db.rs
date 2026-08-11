@@ -84,6 +84,8 @@ pub struct RequestLogRow {
     pub first_token_ms: Option<i64>,
     pub prompt_tokens: Option<i64>,
     pub completion_tokens: Option<i64>,
+    pub cached_tokens: Option<i64>,
+    pub cache_creation_tokens: Option<i64>,
     pub error: Option<String>,
 }
 
@@ -589,8 +591,8 @@ impl Db {
             "INSERT INTO request_logs
                (id, created_at, client_key_id, client_key_name, route_key_id, route_key_name,
                 method, path, model, stream, status, latency_ms, first_token_ms,
-                prompt_tokens, completion_tokens, error)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
+                prompt_tokens, completion_tokens, cached_tokens, cache_creation_tokens, error)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)",
             params![
                 row.id,
                 row.created_at,
@@ -607,6 +609,8 @@ impl Db {
                 row.first_token_ms,
                 row.prompt_tokens,
                 row.completion_tokens,
+                row.cached_tokens,
+                row.cache_creation_tokens,
                 row.error,
             ],
         )?;
@@ -621,6 +625,8 @@ impl Db {
         total_ms: i64,
         prompt_tokens: Option<i64>,
         completion_tokens: Option<i64>,
+        cached_tokens: Option<i64>,
+        cache_creation_tokens: Option<i64>,
     ) -> Result<(), ApiError> {
         let conn = self.0.lock().unwrap();
         conn.execute(
@@ -628,14 +634,18 @@ impl Db {
              SET first_token_ms = COALESCE(?2, first_token_ms),
                  latency_ms = ?3,
                  prompt_tokens = COALESCE(?4, prompt_tokens),
-                 completion_tokens = COALESCE(?5, completion_tokens)
+                 completion_tokens = COALESCE(?5, completion_tokens),
+                 cached_tokens = COALESCE(?6, cached_tokens),
+                 cache_creation_tokens = COALESCE(?7, cache_creation_tokens)
              WHERE id = ?1",
             params![
                 id,
                 first_token_ms,
                 total_ms,
                 prompt_tokens,
-                completion_tokens
+                completion_tokens,
+                cached_tokens,
+                cache_creation_tokens
             ],
         )?;
         Ok(())
@@ -660,7 +670,7 @@ impl Db {
         let mut stmt = conn.prepare(&format!(
             "SELECT id, created_at, client_key_id, client_key_name, route_key_id, route_key_name,
                     method, path, model, stream, status, latency_ms, first_token_ms,
-                    prompt_tokens, completion_tokens, error
+                    prompt_tokens, completion_tokens, cached_tokens, cache_creation_tokens, error
              FROM request_logs{where_sql}
              ORDER BY created_at DESC, rowid DESC
              LIMIT ? OFFSET ?"
@@ -682,7 +692,9 @@ impl Db {
                 first_token_ms: r.get(12)?,
                 prompt_tokens: r.get(13)?,
                 completion_tokens: r.get(14)?,
-                error: r.get(15)?,
+                cached_tokens: r.get(15)?,
+                cache_creation_tokens: r.get(16)?,
+                error: r.get(17)?,
             })
         })?;
         let items = rows.collect::<rusqlite::Result<Vec<_>>>()?;
@@ -704,6 +716,8 @@ impl Db {
                 "SELECT COUNT(*),
                         COALESCE(SUM(prompt_tokens), 0),
                         COALESCE(SUM(completion_tokens), 0),
+                        COALESCE(SUM(cached_tokens), 0),
+                        COALESCE(SUM(cache_creation_tokens), 0),
                         COALESCE(SUM(latency_ms), 0)
                  FROM request_logs{where_sql}"
             ),
@@ -713,7 +727,9 @@ impl Db {
                     total_calls: r.get(0)?,
                     total_prompt_tokens: r.get(1)?,
                     total_completion_tokens: r.get(2)?,
-                    total_duration_ms: r.get(3)?,
+                    total_cached_tokens: r.get(3)?,
+                    total_cache_creation_tokens: r.get(4)?,
+                    total_duration_ms: r.get(5)?,
                 })
             },
         )?;
@@ -779,7 +795,9 @@ fn log_group_stats(
     let mut stmt = conn.prepare(&format!(
         "SELECT {label_col}, COUNT(*),
                 COALESCE(SUM(prompt_tokens), 0),
-                COALESCE(SUM(completion_tokens), 0)
+                COALESCE(SUM(completion_tokens), 0),
+                COALESCE(SUM(cached_tokens), 0),
+                COALESCE(SUM(cache_creation_tokens), 0)
          FROM request_logs{where_sql}
          GROUP BY {group_col}
          ORDER BY (COALESCE(SUM(prompt_tokens), 0) + COALESCE(SUM(completion_tokens), 0)) DESC
@@ -791,6 +809,8 @@ fn log_group_stats(
             calls: r.get(1)?,
             prompt_tokens: r.get(2)?,
             completion_tokens: r.get(3)?,
+            cached_tokens: r.get(4)?,
+            cache_creation_tokens: r.get(5)?,
         })
     })?;
     let groups = rows.collect::<rusqlite::Result<Vec<_>>>()?;

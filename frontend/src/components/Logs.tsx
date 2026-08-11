@@ -137,6 +137,9 @@ export default function Logs({ keys, clientKeys }: Props) {
             <StatTile label="调用次数" value={stats.totals.total_calls.toLocaleString()} />
             <StatTile label="Prompt Token" value={fmtTokensNum(stats.totals.total_prompt_tokens)} />
             <StatTile label="Completion Token" value={fmtTokensNum(stats.totals.total_completion_tokens)} />
+            <StatTile label="缓存命中" value={fmtTokensNum(stats.totals.total_cached_tokens)} />
+            <StatTile label="缓存写入" value={fmtTokensNum(stats.totals.total_cache_creation_tokens)} />
+            <StatTile label="缓存命中率" value={cacheHitRate(stats.totals.total_cached_tokens, stats.totals.total_prompt_tokens)} />
             <StatTile label="平均耗时" value={avgMs(stats.totals)} />
           </div>
           {(stats.by_model.length > 0 || stats.by_client.length > 0) && (
@@ -171,7 +174,7 @@ export default function Logs({ keys, clientKeys }: Props) {
             <span>模型</span>
             <span>调用</span>
             <span>首字 / 总耗时</span>
-            <span>Token</span>
+            <span>输入/输出 · 缓存读/写</span>
           </div>
           {rows.map((r) => <LogRow key={r.id} log={r} />)}
         </div>
@@ -202,7 +205,7 @@ function LogRow({ log }: { log: RequestLog }) {
             ? `${log.first_token_ms === null ? '—' : `${log.first_token_ms}ms`} / ${log.latency_ms}ms`
             : `${log.latency_ms}ms`}
         </span>
-        <span className="log-cell log-tokens">{fmtTokens(log)}</span>
+        <span className="log-cell log-tokens" title={fmtTokens(log)}>{fmtTokens(log)}</span>
       </div>
       {open && hasDetail && (
         <div className="log-detail">
@@ -218,7 +221,10 @@ function fmtTokens(log: RequestLog) {
   if (log.prompt_tokens === null && log.completion_tokens === null) return '—'
   const p = log.prompt_tokens ?? 0
   const c = log.completion_tokens ?? 0
-  return `${p}/${c}`
+  const cache = log.cached_tokens ?? 0
+  const created = log.cache_creation_tokens ?? 0
+  const cacheText = cache > 0 || created > 0 ? ` · 缓存 ${cache}/${created}` : ''
+  return `${p}/${c}${cacheText}`
 }
 
 function formatTime(seconds: number) {
@@ -244,6 +250,10 @@ function avgMs(t: LogStatsTotals) {
   return t.total_calls > 0 ? `${Math.round(t.total_duration_ms / t.total_calls)}ms` : '—'
 }
 
+function cacheHitRate(cached: number, prompt: number) {
+  return prompt > 0 ? `${((cached / prompt) * 100).toFixed(1)}%` : '—'
+}
+
 function GroupBarList({ title, groups }: { title: string; groups: LogStatsGroup[] }) {
   if (groups.length === 0) return null
   const max = Math.max(...groups.map((g) => g.prompt_tokens + g.completion_tokens))
@@ -257,7 +267,9 @@ function GroupBarList({ title, groups }: { title: string; groups: LogStatsGroup[
           <div className="log-stat-row" key={g.name}>
             <div className="log-stat-row-top">
               <span className="log-stat-name" title={g.name}>{g.name || '（未知）'}</span>
-              <span className="log-stat-nums">{fmtTokensNum(total)} · {g.calls} 次</span>
+              <span className="log-stat-nums">
+                {fmtTokensNum(total)} · 缓存 {fmtTokensNum(g.cached_tokens)} · {g.calls} 次
+              </span>
             </div>
             <div className="log-stat-bar">
               <div className="log-stat-bar-fill" style={{ width: `${pct}%` }} />

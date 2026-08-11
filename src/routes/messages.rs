@@ -114,6 +114,8 @@ async fn messages_inner(
                 latency_ms,
                 prompt_tokens: None,
                 completion_tokens: None,
+                cached_tokens: None,
+                cache_creation_tokens: None,
                 error: Some(error),
             },
         );
@@ -133,6 +135,8 @@ async fn messages_inner(
                 latency_ms,
                 prompt_tokens: None,
                 completion_tokens: None,
+                cached_tokens: None,
+                cache_creation_tokens: None,
                 error: None,
             },
         )
@@ -155,8 +159,10 @@ async fn messages_inner(
             stream: false,
             status: 200,
             latency_ms,
-            prompt_tokens: usage.and_then(|u| u.0),
-            completion_tokens: usage.and_then(|u| u.1),
+            prompt_tokens: usage.and_then(|u| u.prompt),
+            completion_tokens: usage.and_then(|u| u.completion),
+            cached_tokens: usage.and_then(|u| u.cached),
+            cache_creation_tokens: usage.and_then(|u| u.cache_creation),
             error: None,
         },
     );
@@ -278,7 +284,7 @@ fn stream_response(
         yield Ok(event("content_block_start", json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}})));
         let mut buffer = String::new();
         let mut stop_reason = "end_turn";
-        let mut usage: Option<(Option<i64>, Option<i64>)> = None;
+        let mut usage: Option<logs::Usage> = None;
         let mut first_token_ms: Option<i64> = None;
         while let Some(chunk) = source.next().await {
             let Ok(chunk) = chunk else { break };
@@ -301,13 +307,15 @@ fn stream_response(
                 }
             }
         }
-        let (prompt, completion) = usage.unwrap_or((None, None));
+        let usage = usage.unwrap_or_default();
         let _ = st.db.finalize_stream_log(
             &log_id,
             first_token_ms,
             started.elapsed().as_millis() as i64,
-            prompt,
-            completion,
+            usage.prompt,
+            usage.completion,
+            usage.cached,
+            usage.cache_creation,
         );
         yield Ok(event("content_block_stop", json!({"type":"content_block_stop","index":0})));
         yield Ok(event("message_delta", json!({"type":"message_delta","delta":{"stop_reason":stop_reason,"stop_sequence":null},"usage":{"output_tokens":0}})));

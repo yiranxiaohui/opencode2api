@@ -166,6 +166,61 @@ mod m20260811_000003_add_first_token_timing {
     }
 }
 
+mod m20260811_000004_add_cache_usage {
+    use sea_orm_migration::prelude::*;
+    use sea_orm_migration::sea_orm::{DbBackend, Statement};
+
+    pub struct Migration;
+
+    impl MigrationName for Migration {
+        fn name(&self) -> &str {
+            "m20260811_000004_add_cache_usage"
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl MigrationTrait for Migration {
+        async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            let connection = manager.get_connection();
+            let columns = connection
+                .query_all(Statement::from_string(
+                    DbBackend::Sqlite,
+                    "PRAGMA table_info('request_logs')".to_owned(),
+                ))
+                .await?;
+            let has = |name: &str| {
+                columns
+                    .iter()
+                    .any(|row| row.try_get::<String>("", "name").as_deref() == Ok(name))
+            };
+            if !has("cached_tokens") {
+                connection
+                    .execute_unprepared("ALTER TABLE request_logs ADD COLUMN cached_tokens INTEGER")
+                    .await?;
+            }
+            if !has("cache_creation_tokens") {
+                connection
+                    .execute_unprepared(
+                        "ALTER TABLE request_logs ADD COLUMN cache_creation_tokens INTEGER",
+                    )
+                    .await?;
+            }
+            Ok(())
+        }
+
+        async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            let connection = manager.get_connection();
+            connection
+                .execute_unprepared("ALTER TABLE request_logs DROP COLUMN cache_creation_tokens")
+                .await?;
+            connection
+                .execute_unprepared("ALTER TABLE request_logs DROP COLUMN cached_tokens")
+                .await?;
+            Ok(())
+        }
+    }
+}
+
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -175,6 +230,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260811_000001_initial::Migration),
             Box::new(m20260811_000002_add_api_key_proxy::Migration),
             Box::new(m20260811_000003_add_first_token_timing::Migration),
+            Box::new(m20260811_000004_add_cache_usage::Migration),
         ]
     }
 }
@@ -230,7 +286,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(applied, 3);
+        assert_eq!(applied, 4);
         assert_eq!(has_proxy_id, 1);
 
         drop(connection);

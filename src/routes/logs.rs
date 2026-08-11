@@ -87,6 +87,8 @@ pub struct LogInput<'a> {
     pub latency_ms: i64,
     pub prompt_tokens: Option<i64>,
     pub completion_tokens: Option<i64>,
+    pub cached_tokens: Option<i64>,
+    pub cache_creation_tokens: Option<i64>,
     pub error: Option<String>,
 }
 
@@ -108,6 +110,8 @@ pub fn insert_log(st: &AppState, input: &LogInput<'_>) -> Result<String, ApiErro
         first_token_ms: None,
         prompt_tokens: input.prompt_tokens,
         completion_tokens: input.completion_tokens,
+        cached_tokens: input.cached_tokens,
+        cache_creation_tokens: input.cache_creation_tokens,
         error: input.error.clone(),
     })?;
     Ok(id)
@@ -137,26 +141,49 @@ pub fn record_failure(
             latency_ms,
             prompt_tokens: None,
             completion_tokens: None,
+            cached_tokens: None,
+            cache_creation_tokens: None,
             error: Some(error.message()),
         },
     );
 }
 
-pub fn usage_from_json(value: &Value) -> Option<(Option<i64>, Option<i64>)> {
-    let prompt = value
-        .pointer("/usage/prompt_tokens")
-        .and_then(Value::as_i64);
-    let completion = value
-        .pointer("/usage/completion_tokens")
-        .and_then(Value::as_i64);
-    if prompt.is_some() || completion.is_some() {
-        Some((prompt, completion))
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Usage {
+    pub prompt: Option<i64>,
+    pub completion: Option<i64>,
+    pub cached: Option<i64>,
+    pub cache_creation: Option<i64>,
+}
+
+pub fn usage_from_json(value: &Value) -> Option<Usage> {
+    let cache_read = value.pointer("/usage/cache_read_input_tokens").and_then(Value::as_i64);
+    let cache_creation = value.pointer("/usage/cache_creation_input_tokens").and_then(Value::as_i64);
+    let input = value.pointer("/usage/input_tokens").and_then(Value::as_i64);
+    // Anthropic reports uncached input, cache reads and cache writes separately.
+    // Normalize prompt to the total input footprint so hit-rate calculations
+    // have the same denominator as OpenAI's prompt/input token total.
+    let anthropic_prompt = input.map(|tokens| {
+        tokens + cache_read.unwrap_or(0) + cache_creation.unwrap_or(0)
+    });
+    let usage = Usage {
+        prompt: value.pointer("/usage/prompt_tokens").and_then(Value::as_i64)
+            .or(anthropic_prompt),
+        completion: value.pointer("/usage/completion_tokens").and_then(Value::as_i64)
+            .or_else(|| value.pointer("/usage/output_tokens").and_then(Value::as_i64)),
+        cached: value.pointer("/usage/prompt_tokens_details/cached_tokens").and_then(Value::as_i64)
+            .or_else(|| value.pointer("/usage/input_tokens_details/cached_tokens").and_then(Value::as_i64))
+            .or(cache_read),
+        cache_creation,
+    };
+    if usage != Usage::default() {
+        Some(usage)
     } else {
         None
     }
 }
 
-pub fn usage_from_bytes(bytes: &[u8]) -> Option<(Option<i64>, Option<i64>)> {
+pub fn usage_from_bytes(bytes: &[u8]) -> Option<Usage> {
     let value: Value = serde_json::from_slice(bytes).ok()?;
     usage_from_json(&value)
 }
@@ -185,7 +212,7 @@ where
 {
     let mut stream = Box::pin(stream);
     let mut buffer = String::new();
-    let mut usage: Option<(Option<i64>, Option<i64>)> = None;
+    let mut usage: Option<Usage> = None;
     let mut first_token_ms: Option<i64> = None;
     async_stream::stream! {
         while let Some(chunk) = stream.next().await {
@@ -216,14 +243,36 @@ where
                 }
             }
         }
-        let (prompt, completion) = usage.unwrap_or((None, None));
+        let usage = usage.unwrap_or_default();
         let _ = st.db.finalize_stream_log(
             &log_id,
             first_token_ms,
             started.elapsed().as_millis() as i64,
-            prompt,
-            completion,
+            usage.prompt,
+            usage.completion,
+            usage.cached,
+            usage.cache_creation,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn extracts_cache_usage_from_all_supported_protocols() {
+        let chat = json!({"usage":{"prompt_tokens":100,"completion_tokens":20,"prompt_tokens_details":{"cached_tokens":80}}});
+        assert_eq!(usage_from_json(&chat).unwrap().cached, Some(80));
+
+        let responses = json!({"usage":{"input_tokens":100,"output_tokens":20,"input_tokens_details":{"cached_tokens":70}}});
+        assert_eq!(usage_from_json(&responses).unwrap().cached, Some(70));
+
+        let messages = json!({"usage":{"input_tokens":10,"output_tokens":5,"cache_read_input_tokens":60,"cache_creation_input_tokens":30}});
+        let usage = usage_from_json(&messages).unwrap();
+        assert_eq!(usage.cached, Some(60));
+        assert_eq!(usage.cache_creation, Some(30));
     }
 }
 

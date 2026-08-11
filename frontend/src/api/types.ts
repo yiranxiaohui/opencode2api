@@ -110,6 +110,8 @@ export interface RequestLog {
   first_token_ms: number | null
   prompt_tokens: number | null
   completion_tokens: number | null
+  cached_tokens: number | null
+  cache_creation_tokens: number | null
   error: string | null
 }
 
@@ -131,6 +133,8 @@ export interface LogStatsTotals {
   total_calls: number
   total_prompt_tokens: number
   total_completion_tokens: number
+  total_cached_tokens: number
+  total_cache_creation_tokens: number
   total_duration_ms: number
 }
 
@@ -139,6 +143,8 @@ export interface LogStatsGroup {
   calls: number
   prompt_tokens: number
   completion_tokens: number
+  cached_tokens: number
+  cache_creation_tokens: number
 }
 
 export interface LogStatsResponse {
