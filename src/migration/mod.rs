@@ -23,6 +23,8 @@ CREATE TABLE IF NOT EXISTS api_keys (
   model_cache TEXT NOT NULL DEFAULT '[]',
   is_default INTEGER NOT NULL DEFAULT 0,
   is_enabled INTEGER NOT NULL DEFAULT 1,
+  cookie_enc TEXT,
+  workspace_id TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -310,6 +312,49 @@ mod m20260811_000006_add_account_enabled {
     }
 }
 
+mod m20260811_000007_add_account_cookie {
+    use sea_orm_migration::prelude::*;
+    use sea_orm_migration::sea_orm::{DbBackend, Statement};
+
+    pub struct Migration;
+    impl MigrationName for Migration {
+        fn name(&self) -> &str {
+            "m20260811_000007_add_account_cookie"
+        }
+    }
+    #[async_trait::async_trait]
+    impl MigrationTrait for Migration {
+        async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            let connection = manager.get_connection();
+            let columns = connection
+                .query_all(Statement::from_string(
+                    DbBackend::Sqlite,
+                    "PRAGMA table_info('api_keys')".to_owned(),
+                ))
+                .await?;
+            let has = |name: &str| {
+                columns
+                    .iter()
+                    .any(|row| row.try_get::<String>("", "name").as_deref() == Ok(name))
+            };
+            if !has("cookie_enc") {
+                connection
+                    .execute_unprepared("ALTER TABLE api_keys ADD COLUMN cookie_enc TEXT")
+                    .await?;
+            }
+            if !has("workspace_id") {
+                connection
+                    .execute_unprepared("ALTER TABLE api_keys ADD COLUMN workspace_id TEXT")
+                    .await?;
+            }
+            Ok(())
+        }
+        async fn down(&self, _manager: &SchemaManager) -> Result<(), DbErr> {
+            Ok(())
+        }
+    }
+}
+
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -322,6 +367,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260811_000004_add_cache_usage::Migration),
             Box::new(m20260811_000005_add_client_key_encryption::Migration),
             Box::new(m20260811_000006_add_account_enabled::Migration),
+            Box::new(m20260811_000007_add_account_cookie::Migration),
         ]
     }
 }
@@ -391,10 +437,13 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(applied, 6);
+        let has_cookie: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('api_keys') WHERE name IN ('cookie_enc','workspace_id')", [], |row| row.get(0)).unwrap();
+        assert_eq!(applied, 7);
         assert_eq!(has_proxy_id, 1);
         assert_eq!(has_client_key_enc, 1);
         assert_eq!(has_is_enabled, 1);
+        assert_eq!(has_cookie, 2);
 
         drop(connection);
         std::fs::remove_file(path).unwrap();

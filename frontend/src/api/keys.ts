@@ -2,6 +2,8 @@ import { del, get, post, put } from './client'
 import type {
   ClientApiKey,
   ClientApiKeyCreated,
+  CookieImportInput,
+  AccountUsage,
   ExportPayload,
   ImportResult,
   KeyInput,
@@ -34,6 +36,8 @@ export const keysApi = {
     post<{ ok: boolean }>(`/api/keys/${id}/set-enabled`, { enabled }),
   exportAll: () => get<ExportPayload>('/api/export'),
   import: (payload: unknown) => post<ImportResult>('/api/import', payload),
+  importCookie: (input: CookieImportInput) => post<KeyRecord>('/api/keys/import-cookie', input),
+  usage: (id: string) => get<AccountUsage>(`/api/keys/${id}/usage`),
 }
 
 export const proxiesApi = {

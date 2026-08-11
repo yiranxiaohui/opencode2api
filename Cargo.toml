@@ -13,7 +13,8 @@ aes-gcm = "0.11"
 rand = "0.10"
 rand_core = { version = "0.6", features = ["getrandom"] }
 zeroize = { version = "1", features = ["derive"] }
-reqwest = { version = "0.13", features = ["stream", "json", "socks"] }
+reqwest = { version = "0.13", features = ["stream", "json", "query", "socks"] }
+regex = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }

@@ -9,6 +9,7 @@ mod error;
 mod middleware;
 mod migration;
 mod models;
+mod opencode_account;
 mod routes;
 mod state;
 

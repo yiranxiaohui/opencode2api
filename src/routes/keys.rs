@@ -10,8 +10,8 @@ use crate::db::KeyData;
 use crate::error::ApiError;
 use crate::middleware::Unlocked;
 use crate::models::{
-    KeyEnabledInput, KeyInput, KeyRecord, KeySummary, ModelInfo, OPENCODE_BASE_URL, OkResponse,
-    TestResult, now_secs,
+    AccountUsage, CookieImportInput, KeyEnabledInput, KeyInput, KeyRecord, KeySummary, ModelInfo,
+    OPENCODE_BASE_URL, OkResponse, TestResult, now_secs,
 };
 use crate::state::AppState;
 
@@ -110,6 +110,8 @@ pub async fn create(
             is_default: input.is_default,
             is_enabled: true,
             proxy_id,
+            cookie_enc: None,
+            workspace_id: None,
         },
         now,
     )?;
@@ -168,6 +170,8 @@ pub async fn update(
             is_default: input.is_default && existing.is_enabled,
             is_enabled: existing.is_enabled,
             proxy_id,
+            cookie_enc: existing.cookie_enc.clone(),
+            workspace_id: existing.workspace_id.clone(),
         },
         now_secs(),
     )?;
@@ -179,6 +183,74 @@ pub async fn update(
         api_key: decrypted.to_string(),
         model_cache: row.model_cache,
     }))
+}
+
+pub async fn import_cookie(
+    State(st): State<AppState>,
+    _: Unlocked,
+    Json(input): Json<CookieImportInput>,
+) -> Result<(StatusCode, Json<KeyRecord>), ApiError> {
+    let cookie = crate::opencode_account::normalize_cookie(&input.cookie)?;
+    let proxy_id = resolve_proxy(&st, input.proxy_id.as_deref()).await?;
+    let client = st.client_for_proxy_id(proxy_id.as_deref()).await?;
+    let (workspace_id, api_key) = crate::opencode_account::discover(&client, &cookie).await?;
+    let mut name = input
+        .name
+        .filter(|v| !v.trim().is_empty())
+        .map(|v| v.trim().to_string())
+        .unwrap_or_else(|| format!("OpenCode {workspace_id}"));
+    if st.db.get_key_by_name(&name)?.is_some() {
+        name = format!("{name} {}", &Uuid::new_v4().simple().to_string()[..4]);
+    }
+    let id = Uuid::new_v4().to_string();
+    st.db.insert_key(
+        &id,
+        &KeyData {
+            name,
+            base_url: OPENCODE_BASE_URL.into(),
+            api_key_enc: st.encrypt_secret(&api_key).await?,
+            tags: vec![],
+            notes: "Cookie 导入".into(),
+            is_default: false,
+            is_enabled: true,
+            proxy_id,
+            cookie_enc: Some(st.encrypt_secret(&cookie).await?),
+            workspace_id: Some(workspace_id),
+        },
+        now_secs(),
+    )?;
+    let row = st.db.get_key(&id)?.unwrap();
+    Ok((
+        StatusCode::CREATED,
+        Json(KeyRecord {
+            summary: KeySummary::from_row(&row),
+            api_key,
+            model_cache: vec![],
+        }),
+    ))
+}
+
+pub async fn usage(
+    State(st): State<AppState>,
+    _: Unlocked,
+    Path(id): Path<String>,
+) -> Result<Json<AccountUsage>, ApiError> {
+    let row = st
+        .db
+        .get_key(&id)?
+        .ok_or_else(|| ApiError::NotFound("key not found".into()))?;
+    let cookie_enc = row.cookie_enc.as_deref().ok_or_else(|| {
+        ApiError::BadRequest("该账号不是通过 Cookie 导入，无法查询套餐额度".into())
+    })?;
+    let workspace = row
+        .workspace_id
+        .as_deref()
+        .ok_or_else(|| ApiError::Internal("账号缺少 workspace".into()))?;
+    let cookie = st.decrypt_secret(cookie_enc).await?;
+    let client = st.client_for_key(&row).await?;
+    Ok(Json(
+        crate::opencode_account::usage(&client, &cookie, workspace).await?,
+    ))
 }
 
 pub async fn delete(
@@ -305,7 +377,10 @@ pub async fn test(
 }
 
 /// Validate a requested proxy id (if any) and return it, or `None` for no proxy.
-async fn resolve_proxy(st: &AppState, proxy_id: Option<&str>) -> Result<Option<String>, ApiError> {
+pub(crate) async fn resolve_proxy(
+    st: &AppState,
+    proxy_id: Option<&str>,
+) -> Result<Option<String>, ApiError> {
     let Some(pid) = proxy_id.filter(|s| !s.trim().is_empty()) else {
         return Ok(None);
     };

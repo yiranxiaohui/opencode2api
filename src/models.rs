@@ -43,6 +43,8 @@ pub struct KeySummary {
     pub updated_at: i64,
     pub proxy_id: Option<String>,
     pub proxy_name: Option<String>,
+    pub has_cookie: bool,
+    pub workspace_id: Option<String>,
 }
 
 impl KeySummary {
@@ -60,6 +62,8 @@ impl KeySummary {
             updated_at: r.updated_at,
             proxy_id: r.proxy_id.clone(),
             proxy_name: r.proxy_name.clone(),
+            has_cookie: r.cookie_enc.is_some(),
+            workspace_id: r.workspace_id.clone(),
         }
     }
 }
@@ -104,6 +108,37 @@ fn default_true() -> bool {
 #[derive(Debug, Deserialize)]
 pub struct KeyEnabledInput {
     pub enabled: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CookieImportInput {
+    pub cookie: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub proxy_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UsageWindow {
+    pub usage_percent: f64,
+    pub remaining_percent: f64,
+    pub reset_in_sec: i64,
+    pub status: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AccountUsage {
+    pub plan_name: String,
+    pub plan_status: String,
+    pub region: Option<String>,
+    pub balance_microcents: Option<i64>,
+    pub monthly_limit_microcents: Option<i64>,
+    pub monthly_usage_microcents: Option<i64>,
+    pub rolling: Option<UsageWindow>,
+    pub weekly: Option<UsageWindow>,
+    pub monthly: Option<UsageWindow>,
+    pub fetched_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
