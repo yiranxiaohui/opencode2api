@@ -12,7 +12,7 @@ import ProxyFormModal from './components/ProxyFormModal'
 import ProxyList from './components/ProxyList'
 import Settings from './components/Settings'
 import ToastHost from './components/ToastHost'
-import { ActivityIcon, ChatIcon, GearIcon, GlobeIcon, KeyIcon, PlusIcon, VaultIcon } from './components/icons'
+import { ActivityIcon, ChatIcon, GatewayIcon, GearIcon, GlobeIcon, KeyIcon, PlusIcon } from './components/icons'
 import { useKeys } from './hooks/useKeys'
 import { useProxies } from './hooks/useProxies'
 import { useSession } from './hooks/useSession'
@@ -187,13 +187,13 @@ export default function App() {
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">
-            <VaultIcon size={18} />
+            <GatewayIcon size={20} />
           </div>
           <div>
             <div className="brand-name">
               opencode2api
             </div>
-            <div className="brand-sub">OpenAI Gate</div>
+            <div className="brand-sub">API Gateway</div>
           </div>
         </div>
         <button className={`nav-item ${tab === 'keys' ? 'active' : ''}`} onClick={() => setTab('keys')}>
@@ -320,7 +320,7 @@ function BootScreen({ error }: { error?: string }) {
     <div className="auth-wrap">
       <div className="auth-card" style={{ textAlign: 'center' }}>
         <div className="auth-mark" style={{ margin: '0 auto 20px' }}>
-          <VaultIcon size={26} />
+          <GatewayIcon size={28} />
         </div>
         {error ? (
           <>

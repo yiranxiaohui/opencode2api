@@ -1,0 +1,15 @@
+name: opencode2api
+services:
+  app:
+    image: ghcr.io/yiranxiaohui/opencode2api:latest
+    container_name: opencode2api
+    restart: unless-stopped
+    ports:
+      - "${OPENCODE2API_PORT:-8787}:8787"
+    environment:
+      OPENCODE2API_BIND: 0.0.0.0:8787
+      OPENCODE2API_DATA_DIR: /data
+      OPENCODE2API_WEB_DIST: /app/frontend/dist
+      RUST_LOG: "${RUST_LOG:-info}"
+    volumes:
+      - ./data:/data

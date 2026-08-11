@@ -32,6 +32,17 @@ export const VaultIcon = ({ size, style, className }: IconProps) => (
   </svg>
 )
 
+export const GatewayIcon = ({ size, style, className }: IconProps) => (
+  <svg {...base({ size, style, className })} aria-hidden="true">
+    <circle cx="4" cy="6" r="1.5" fill="currentColor" stroke="none" />
+    <circle cx="4" cy="18" r="1.5" fill="currentColor" stroke="none" />
+    <circle cx="20" cy="6" r="1.5" fill="currentColor" stroke="none" />
+    <circle cx="20" cy="18" r="1.5" fill="currentColor" stroke="none" />
+    <path d="M5.5 6h3L12 12l3.5-6h3M5.5 18h3l3.5-6 3.5 6h3" />
+    <rect x="9.5" y="9.5" width="5" height="5" rx="1.5" fill="var(--panel-2, #141210)" />
+  </svg>
+)
+
 export const PlayIcon = ({ size, style, className }: IconProps) => (
   <svg {...base({ size, style, className })}>
     <circle cx="12" cy="12" r="9" />

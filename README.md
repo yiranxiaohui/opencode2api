@@ -148,6 +148,24 @@ Rust：axum 0.8 · tokio · rusqlite(bundled) · SeaORM Migration · argon2 · a
 
 ## Docker
 
+使用 Docker Compose：
+
+```bash
+docker compose up -d
+```
+
+默认拉取 GHCR 最新镜像；如需基于当前源码重新构建：
+
+```bash
+docker compose build
+docker compose up -d
+```
+
+可通过 `OPENCODE2API_PORT=9000 docker compose up -d` 修改宿主机端口。数据保存在
+`opencode2api-data` 命名卷中。
+
+也可以直接使用 Docker：
+
 ```bash
 docker run -d \
   --name opencode2api \
