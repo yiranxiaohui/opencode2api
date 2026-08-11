@@ -221,6 +221,49 @@ mod m20260811_000004_add_cache_usage {
     }
 }
 
+mod m20260811_000005_add_client_key_encryption {
+    use sea_orm_migration::prelude::*;
+    use sea_orm_migration::sea_orm::{DbBackend, Statement};
+
+    pub struct Migration;
+
+    impl MigrationName for Migration {
+        fn name(&self) -> &str {
+            "m20260811_000005_add_client_key_encryption"
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl MigrationTrait for Migration {
+        async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            let connection = manager.get_connection();
+            let columns = connection
+                .query_all(Statement::from_string(
+                    DbBackend::Sqlite,
+                    "PRAGMA table_info('client_api_keys')".to_owned(),
+                ))
+                .await?;
+            let has_key_enc = columns
+                .iter()
+                .any(|row| row.try_get::<String>("", "name").as_deref() == Ok("key_enc"));
+            if !has_key_enc {
+                connection
+                    .execute_unprepared("ALTER TABLE client_api_keys ADD COLUMN key_enc TEXT")
+                    .await?;
+            }
+            Ok(())
+        }
+
+        async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            manager
+                .get_connection()
+                .execute_unprepared("ALTER TABLE client_api_keys DROP COLUMN key_enc")
+                .await?;
+            Ok(())
+        }
+    }
+}
+
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -231,6 +274,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260811_000002_add_api_key_proxy::Migration),
             Box::new(m20260811_000003_add_first_token_timing::Migration),
             Box::new(m20260811_000004_add_cache_usage::Migration),
+            Box::new(m20260811_000005_add_client_key_encryption::Migration),
         ]
     }
 }
@@ -286,8 +330,16 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(applied, 4);
+        let has_client_key_enc: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('client_api_keys') WHERE name = 'key_enc'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(applied, 5);
         assert_eq!(has_proxy_id, 1);
+        assert_eq!(has_client_key_enc, 1);
 
         drop(connection);
         std::fs::remove_file(path).unwrap();
@@ -335,8 +387,16 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
+        let has_client_key_enc: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('client_api_keys') WHERE name = 'key_enc'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(name, "Existing");
         assert_eq!(has_proxy_id, 1);
+        assert_eq!(has_client_key_enc, 1);
 
         drop(connection);
         std::fs::remove_file(path).unwrap();

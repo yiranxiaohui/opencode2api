@@ -1,9 +1,7 @@
-import { useEffect, useState } from 'react'
-import { auth, clientKeysApi } from '../api/keys'
-import type { ClientApiKey, ClientApiKeyCreated } from '../api/types'
+import { useState } from 'react'
+import { auth } from '../api/keys'
 import { toast } from '../lib/toast'
-import CopyButton from './CopyButton'
-import { KeyIcon, PlusIcon, ShieldIcon, TrashIcon } from './icons'
+import { ShieldIcon } from './icons'
 
 export default function Settings() {
   const [oldPw, setOldPw] = useState('')
@@ -11,52 +9,6 @@ export default function Settings() {
   const [confirm, setConfirm] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
-  const [clientKeys, setClientKeys] = useState<ClientApiKey[]>([])
-  const [clientKeyName, setClientKeyName] = useState('')
-  const [keyBusy, setKeyBusy] = useState(false)
-  const [keyErr, setKeyErr] = useState('')
-  const [createdKey, setCreatedKey] = useState<ClientApiKeyCreated | null>(null)
-
-  const loadClientKeys = async () => {
-    try {
-      setClientKeys(await clientKeysApi.list())
-    } catch (e) {
-      setKeyErr(e instanceof Error ? e.message : '访问密钥加载失败')
-    }
-  }
-
-  useEffect(() => {
-    loadClientKeys()
-  }, [])
-
-  const createClientKey = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setKeyErr('')
-    setKeyBusy(true)
-    try {
-      const created = await clientKeysApi.create(clientKeyName)
-      setCreatedKey(created)
-      setClientKeyName('')
-      await loadClientKeys()
-      toast('客户端访问密钥已创建', 'ok')
-    } catch (e) {
-      setKeyErr(e instanceof Error ? e.message : '创建失败')
-    } finally {
-      setKeyBusy(false)
-    }
-  }
-
-  const removeClientKey = async (key: ClientApiKey) => {
-    if (!window.confirm(`撤销访问密钥「${key.name}」？使用它的程序将立即无法调用。`)) return
-    try {
-      await clientKeysApi.remove(key.id)
-      setClientKeys((items) => items.filter((item) => item.id !== key.id))
-      toast('访问密钥已撤销', 'ok')
-    } catch (e) {
-      toast(e instanceof Error ? e.message : '撤销失败', 'err')
-    }
-  }
-
   const changePw = async (e: React.FormEvent) => {
     e.preventDefault()
     setErr('')
@@ -90,66 +42,6 @@ export default function Settings() {
         </div>
       </div>
 
-      <div className="panel" style={{ padding: 20, marginBottom: 16 }}>
-        <div className="settings-heading">
-          <div>
-            <div style={{ fontWeight: 600 }}>客户端访问密钥</div>
-            <div className="small">其他程序调用 /v1/* 时必须作为 Bearer Token 提交。</div>
-          </div>
-          <KeyIcon size={18} />
-        </div>
-
-        <form onSubmit={createClientKey} className="client-key-form">
-          <div className="field">
-            <label>名称</label>
-            <input
-              className="input"
-              placeholder="例如：Cherry Studio"
-              maxLength={80}
-              value={clientKeyName}
-              onChange={(e) => setClientKeyName(e.target.value)}
-            />
-          </div>
-          <p className="auth-err">{keyErr}</p>
-          <button className="btn btn-primary" type="submit" disabled={keyBusy || !clientKeyName.trim()}>
-            <PlusIcon size={13} /> {keyBusy ? '创建中…' : '创建访问密钥'}
-          </button>
-        </form>
-
-        {createdKey && (
-          <div className="created-key">
-            <div>
-              <strong>请立即保存此密钥</strong>
-              <div className="small">出于安全考虑，关闭此提示后将无法再次查看完整内容。</div>
-            </div>
-            <code>{createdKey.api_key}</code>
-            <div className="created-key-actions">
-              <CopyButton text={createdKey.api_key} label="复制密钥" />
-              <button className="btn btn-sm" type="button" onClick={() => setCreatedKey(null)}>已保存</button>
-            </div>
-          </div>
-        )}
-
-        <div className="client-key-list">
-          {clientKeys.length === 0 ? (
-            <div className="small">尚未创建访问密钥；此时代理接口会拒绝所有调用。</div>
-          ) : clientKeys.map((key) => (
-            <div className="client-key-row" key={key.id}>
-              <div className="client-key-info">
-                <strong>{key.name}</strong>
-                <code>{key.prefix}</code>
-                <span className="small">
-                  创建于 {formatTime(key.created_at)} · {key.last_used_at ? `最后使用 ${formatTime(key.last_used_at)}` : '尚未使用'}
-                </span>
-              </div>
-              <button className="btn btn-danger btn-sm" type="button" onClick={() => removeClientKey(key)}>
-                <TrashIcon size={12} /> 撤销
-              </button>
-            </div>
-          ))}
-        </div>
-      </div>
-
       <div className="panel" style={{ padding: 20 }}>
         <form onSubmit={changePw}>
           <div className="field">
@@ -173,8 +65,4 @@ export default function Settings() {
 
     </div>
   )
-}
-
-function formatTime(seconds: number) {
-  return new Date(seconds * 1000).toLocaleString()
 }

@@ -170,6 +170,8 @@ pub struct ClientKeySummary {
     pub prefix: String,
     pub created_at: i64,
     pub last_used_at: Option<i64>,
+    /// Decrypted only for authenticated management requests. Legacy keys are unavailable.
+    pub api_key: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

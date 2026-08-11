@@ -88,6 +88,7 @@ export interface ClientApiKey {
   prefix: string
   created_at: number
   last_used_at: number | null
+  api_key: string | null
 }
 
 export interface ClientApiKeyCreated extends ClientApiKey {

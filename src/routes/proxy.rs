@@ -44,6 +44,7 @@ pub async fn chat_proxy(
         prefix: "internal".into(),
         created_at: 0,
         last_used_at: None,
+        key_enc: None,
     };
     match proxy_inner(st, method, &path, &headers, body, Some(client)).await {
         Ok(resp) => resp,

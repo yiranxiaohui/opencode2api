@@ -12,18 +12,21 @@ pub async fn list(
     State(st): State<AppState>,
     _: Unlocked,
 ) -> Result<Json<Vec<ClientKeySummary>>, ApiError> {
-    let keys = st
-        .db
-        .list_client_keys()?
-        .into_iter()
-        .map(|row| ClientKeySummary {
+    let mut keys = Vec::new();
+    for row in st.db.list_client_keys()? {
+        let api_key = match row.key_enc.as_deref() {
+            Some(encrypted) => Some(st.decrypt_secret(encrypted).await?.to_string()),
+            None => None,
+        };
+        keys.push(ClientKeySummary {
             id: row.id,
             name: row.name,
             prefix: row.prefix,
             created_at: row.created_at,
             last_used_at: row.last_used_at,
-        })
-        .collect();
+            api_key,
+        });
+    }
     Ok(Json(keys))
 }
 
@@ -43,6 +46,7 @@ pub async fn create(
     }
 
     let api_key = crypto::generate_client_key();
+    let key_enc = st.encrypt_secret(&api_key).await?;
 
     let id = Uuid::new_v4().to_string();
     let created_at = now_secs();
@@ -51,6 +55,7 @@ pub async fn create(
         &id,
         name,
         &crypto::hash_client_key(&api_key),
+        &key_enc,
         &prefix,
         created_at,
     )?;
@@ -62,6 +67,7 @@ pub async fn create(
             prefix,
             created_at,
             last_used_at: None,
+            api_key: Some(api_key.clone()),
         },
         api_key,
     }))

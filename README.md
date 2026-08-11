@@ -63,7 +63,7 @@ from openai import OpenAI
 
 client = OpenAI(
     base_url="http://127.0.0.1:8787/v1",
-    api_key="sk-...",  # 在「设置 → 客户端访问密钥」中创建
+    api_key="sk-...",  # 在左侧「密钥管理」中创建并复制
 )
 print(client.chat.completions.create(
     model="deepseek-chat",

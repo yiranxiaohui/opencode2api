@@ -66,6 +66,7 @@ pub struct ClientKeyRow {
     pub prefix: String,
     pub created_at: i64,
     pub last_used_at: Option<i64>,
+    pub key_enc: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -162,7 +163,7 @@ impl Db {
     pub fn list_client_keys(&self) -> Result<Vec<ClientKeyRow>, ApiError> {
         let conn = self.0.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, name, prefix, created_at, last_used_at
+            "SELECT id, name, prefix, created_at, last_used_at, key_enc
              FROM client_api_keys ORDER BY created_at DESC",
         )?;
         let rows = stmt.query_map([], |r| {
@@ -172,6 +173,7 @@ impl Db {
                 prefix: r.get(2)?,
                 created_at: r.get(3)?,
                 last_used_at: r.get(4)?,
+                key_enc: r.get(5)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -182,14 +184,15 @@ impl Db {
         id: &str,
         name: &str,
         key_hash: &str,
+        key_enc: &str,
         prefix: &str,
         created_at: i64,
     ) -> Result<(), ApiError> {
         let conn = self.0.lock().unwrap();
         conn.execute(
-            "INSERT INTO client_api_keys(id, name, key_hash, prefix, created_at)
-             VALUES(?1, ?2, ?3, ?4, ?5)",
-            params![id, name, key_hash, prefix, created_at],
+            "INSERT INTO client_api_keys(id, name, key_hash, key_enc, prefix, created_at)
+             VALUES(?1, ?2, ?3, ?4, ?5, ?6)",
+            params![id, name, key_hash, key_enc, prefix, created_at],
         )?;
         Ok(())
     }
@@ -202,7 +205,7 @@ impl Db {
     pub fn client_key_by_hash(&self, key_hash: &str) -> Result<Option<ClientKeyRow>, ApiError> {
         let conn = self.0.lock().unwrap();
         conn.query_row(
-            "SELECT id, name, prefix, created_at, last_used_at
+            "SELECT id, name, prefix, created_at, last_used_at, key_enc
              FROM client_api_keys WHERE key_hash = ?1",
             params![key_hash],
             |r| {
@@ -212,6 +215,7 @@ impl Db {
                     prefix: r.get(2)?,
                     created_at: r.get(3)?,
                     last_used_at: r.get(4)?,
+                    key_enc: r.get(5)?,
                 })
             },
         )
@@ -552,6 +556,23 @@ impl Db {
             let new_enc = crate::crypto::encrypt(new_key, &pt)?;
             tx.execute(
                 "UPDATE proxies SET url_enc = ?1 WHERE id = ?2",
+                params![new_enc, id],
+            )?;
+            count += 1;
+        }
+        // Newly created client credentials are recoverable from the management
+        // page, so rotate their encrypted copies as well. Legacy rows are NULL.
+        let client_keys: Vec<(String, String)> = {
+            let mut stmt =
+                tx.prepare("SELECT id, key_enc FROM client_api_keys WHERE key_enc IS NOT NULL")?;
+            let mapped = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+            mapped.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        for (id, enc) in client_keys {
+            let pt = crate::crypto::decrypt(old_key, &enc)?;
+            let new_enc = crate::crypto::encrypt(new_key, &pt)?;
+            tx.execute(
+                "UPDATE client_api_keys SET key_enc = ?1 WHERE id = ?2",
                 params![new_enc, id],
             )?;
             count += 1;
