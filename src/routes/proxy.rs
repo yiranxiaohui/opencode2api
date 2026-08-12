@@ -80,6 +80,13 @@ pub(crate) async fn proxy_inner(
         .map_err(|e| ApiError::Internal(format!("read request body: {e}")))?
         .to_bytes();
     let (model, stream) = request_meta(&body_bytes);
+    if let Some(model) = model.as_deref()
+        && st.db.is_model_disabled(model)?
+    {
+        let error = ApiError::BadRequest(format!("model disabled: {model}"));
+        logs::record_failure(&st, &client, None, &method_str, path, 0, &error);
+        return Err(error);
+    }
     let body_bytes = include_stream_usage(body_bytes, path, stream);
     let affinity = affinity_key(headers, &client.id, model.as_deref());
 

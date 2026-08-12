@@ -9,6 +9,11 @@ export interface ModelInfo {
   owned_by: string
 }
 
+export interface ManagedModel extends ModelInfo {
+  account_count: number
+  enabled: boolean
+}
+
 export interface KeySummary {
   id: string
   name: string

@@ -534,6 +534,38 @@ impl Db {
         Ok(())
     }
 
+    pub fn disabled_models(&self) -> Result<std::collections::HashSet<String>, ApiError> {
+        let conn = self.0.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT model_id FROM disabled_models")?;
+        let rows = stmt.query_map([], |row| row.get(0))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    pub fn is_model_disabled(&self, model_id: &str) -> Result<bool, ApiError> {
+        let conn = self.0.lock().unwrap();
+        Ok(conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM disabled_models WHERE model_id = ?1)",
+            params![model_id],
+            |row| row.get(0),
+        )?)
+    }
+
+    pub fn set_model_enabled(&self, model_id: &str, enabled: bool) -> Result<(), ApiError> {
+        let conn = self.0.lock().unwrap();
+        if enabled {
+            conn.execute(
+                "DELETE FROM disabled_models WHERE model_id = ?1",
+                params![model_id],
+            )?;
+        } else {
+            conn.execute(
+                "INSERT OR REPLACE INTO disabled_models (model_id, disabled_at) VALUES (?1, ?2)",
+                params![model_id, now_secs()],
+            )?;
+        }
+        Ok(())
+    }
+
     pub fn set_usage_cache(&self, id: &str, usage: &AccountUsage) -> Result<(), ApiError> {
         let conn = self.0.lock().unwrap();
         conn.execute(

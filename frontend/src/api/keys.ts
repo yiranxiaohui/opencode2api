@@ -13,6 +13,7 @@ import type {
   LogListResponse,
   LogQuery,
   LogStatsResponse,
+  ManagedModel,
   ProxyInput,
   ProxyRecord,
   TestResult,
@@ -23,6 +24,11 @@ export const auth = {
   unlock: (password: string) => post<{ ok: boolean }>('/api/auth/unlock', { password }),
   changePassword: (old_password: string, new_password: string) =>
     post<{ ok: boolean }>('/api/auth/change-password', { old_password, new_password }),
+}
+
+export const modelsApi = {
+  list: () => get<ManagedModel[]>('/api/models'),
+  setEnabled: (id: string, enabled: boolean) => post<{ ok: boolean }>('/api/models/set-enabled', { id, enabled }),
 }
 
 export const keysApi = {

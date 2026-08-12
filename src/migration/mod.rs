@@ -397,6 +397,37 @@ mod m20260811_000008_add_account_usage_cache {
     }
 }
 
+mod m20260812_000009_add_disabled_models {
+    use sea_orm_migration::prelude::*;
+
+    pub struct Migration;
+    impl MigrationName for Migration {
+        fn name(&self) -> &str {
+            "m20260812_000009_add_disabled_models"
+        }
+    }
+    #[async_trait::async_trait]
+    impl MigrationTrait for Migration {
+        async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            manager
+                .get_connection()
+                .execute_unprepared(
+                    "CREATE TABLE IF NOT EXISTS disabled_models (model_id TEXT PRIMARY KEY, disabled_at INTEGER NOT NULL)",
+                )
+                .await?;
+            Ok(())
+        }
+
+        async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            manager
+                .get_connection()
+                .execute_unprepared("DROP TABLE IF EXISTS disabled_models")
+                .await?;
+            Ok(())
+        }
+    }
+}
+
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -411,6 +442,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260811_000006_add_account_enabled::Migration),
             Box::new(m20260811_000007_add_account_cookie::Migration),
             Box::new(m20260811_000008_add_account_usage_cache::Migration),
+            Box::new(m20260812_000009_add_disabled_models::Migration),
         ]
     }
 }
@@ -489,12 +521,20 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(applied, 8);
+        assert_eq!(applied, 9);
         assert_eq!(has_proxy_id, 1);
         assert_eq!(has_client_key_enc, 1);
         assert_eq!(has_is_enabled, 1);
         assert_eq!(has_cookie, 2);
         assert_eq!(has_usage_cache, 1);
+        let has_disabled_models: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='disabled_models'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(has_disabled_models, 1);
 
         drop(connection);
         std::fs::remove_file(path).unwrap();

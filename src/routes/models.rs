@@ -9,6 +9,7 @@ use serde_json::{Value, json};
 
 use crate::error::ApiError;
 use crate::middleware::Unlocked;
+use crate::models::{ManagedModel, ModelEnabledInput, OkResponse};
 use crate::state::AppState;
 
 /// Gateway-wide model catalog. Every configured route is queried concurrently
@@ -112,10 +113,54 @@ async fn models_inner(st: AppState, headers: &HeaderMap) -> Result<Value, ApiErr
         )));
     }
 
+    let disabled = st.db.disabled_models()?;
     Ok(json!({
         "object": "list",
-        "data": models.into_values().collect::<Vec<_>>()
+        "data": models.into_iter().filter(|(id, _)| !disabled.contains(id)).map(|(_, value)| value).collect::<Vec<_>>()
     }))
+}
+
+pub async fn catalog(
+    State(st): State<AppState>,
+    _: Unlocked,
+) -> Result<Json<Vec<ManagedModel>>, ApiError> {
+    let disabled = st.db.disabled_models()?;
+    let mut models = BTreeMap::<String, (String, usize)>::new();
+    for account in st
+        .db
+        .list_keys()?
+        .into_iter()
+        .filter(|item| item.is_enabled)
+    {
+        for model in account.model_cache {
+            let entry = models.entry(model.id).or_insert((model.owned_by, 0));
+            entry.1 += 1;
+        }
+    }
+    Ok(Json(
+        models
+            .into_iter()
+            .map(|(id, (owned_by, account_count))| ManagedModel {
+                enabled: !disabled.contains(&id),
+                id,
+                owned_by,
+                account_count,
+            })
+            .collect(),
+    ))
+}
+
+pub async fn set_enabled(
+    State(st): State<AppState>,
+    _: Unlocked,
+    Json(input): Json<ModelEnabledInput>,
+) -> Result<Json<OkResponse>, ApiError> {
+    let id = input.id.trim();
+    if id.is_empty() {
+        return Err(ApiError::BadRequest("模型 ID 不能为空".into()));
+    }
+    st.db.set_model_enabled(id, input.enabled)?;
+    Ok(Json(OkResponse { ok: true }))
 }
 
 #[cfg(test)]
