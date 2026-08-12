@@ -1,6 +1,22 @@
 use serde::{Deserialize, Serialize};
 
 pub const OPENCODE_BASE_URL: &str = "https://opencode.ai/zen/go/v1";
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AccountType {
+    #[default]
+    Normal,
+    Go,
+}
+
+impl AccountType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Normal => "normal",
+            Self::Go => "go",
+        }
+    }
+}
 
 pub fn now_secs() -> i64 {
     std::time::SystemTime::now()
@@ -22,6 +38,8 @@ pub struct KeyInput {
     #[serde(default)]
     pub notes: String,
     #[serde(default)]
+    pub account_type: Option<AccountType>,
+    #[serde(default)]
     pub is_default: bool,
     /// Attached forward proxy (HTTP/SOCKS5) from the pool, if any.
     /// Outer `None` = field omitted (keep existing on update); inner `None` = explicitly no proxy.
@@ -37,6 +55,7 @@ pub struct KeySummary {
     pub tags: Vec<String>,
     pub notes: String,
     pub is_enabled: bool,
+    pub account_type: AccountType,
     /// Unix timestamp at which quota routing cooldown ends, if currently active.
     pub cooldown_until: Option<i64>,
     pub model_count: usize,
@@ -58,6 +77,7 @@ impl KeySummary {
             tags: r.tags.clone(),
             notes: r.notes.clone(),
             is_enabled: r.is_enabled,
+            account_type: r.account_type,
             cooldown_until: None,
             model_count: r.model_cache.len(),
             created_at: r.created_at,
@@ -113,6 +133,8 @@ pub struct ExportItem {
     pub notes: String,
     #[serde(default = "default_true")]
     pub is_enabled: bool,
+    #[serde(default)]
+    pub account_type: AccountType,
     /// Name of the attached proxy (matched by name on import).
     #[serde(default)]
     pub proxy: Option<String>,
@@ -134,6 +156,8 @@ pub struct CookieImportInput {
     pub name: Option<String>,
     #[serde(default)]
     pub proxy_id: Option<String>,
+    #[serde(default)]
+    pub account_type: AccountType,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

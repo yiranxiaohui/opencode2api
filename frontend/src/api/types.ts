@@ -21,6 +21,7 @@ export interface KeySummary {
   tags: string[]
   notes: string
   is_enabled: boolean
+  account_type: 'normal' | 'go'
   cooldown_until: number | null
   model_count: number
   created_at: number
@@ -43,6 +44,7 @@ export interface KeyInput {
   api_key?: string
   tags: string[]
   notes: string
+  account_type: 'normal' | 'go'
   proxy_id?: string | null
 }
 
@@ -53,7 +55,7 @@ export interface TestResult {
   error: string | null
 }
 
-export interface CookieImportInput { cookie: string; name?: string; proxy_id?: string | null }
+export interface CookieImportInput { cookie: string; name?: string; proxy_id?: string | null; account_type: 'normal' | 'go' }
 export interface UsageWindow { usage_percent: number; remaining_percent: number; reset_in_sec: number; status: string }
 export interface AccountUsage {
   plan_name: string; plan_status: string; region: string | null
@@ -74,6 +76,7 @@ export interface ExportItem {
   tags: string[]
   notes: string
   is_enabled?: boolean
+  account_type?: 'normal' | 'go'
   proxy?: string | null
 }
 

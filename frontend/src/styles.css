@@ -183,6 +183,7 @@ select.input { appearance: none; }
 .toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
 .toolbar .grow { flex: 1; }
 .status-filters { display: flex; gap: 6px; margin: -6px 0 16px; flex-wrap: wrap; }
+.filter-divider { width: 1px; align-self: stretch; background: var(--border-strong); margin: 2px 3px; }
 
 .panel {
   background: var(--panel);
@@ -236,6 +237,14 @@ select.input { appearance: none; }
   flex: none; font-size: 10px; font-family: var(--mono); letter-spacing: .06em;
   color: var(--ok); border: 1px solid rgba(92, 184, 132, 0.35);
   background: var(--ok-soft); border-radius: 4px; padding: 1px 6px;
+}
+.account-type-badge {
+  flex: none; font-size: 10px; font-family: var(--mono); letter-spacing: .06em;
+  color: var(--muted); border: 1px solid var(--border-strong);
+  background: var(--panel-3); border-radius: 4px; padding: 1px 6px;
+}
+.account-type-badge.go {
+  color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft);
 }
 .key-name .proxy-badge {
   flex: none;

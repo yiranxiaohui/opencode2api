@@ -4,16 +4,18 @@ use std::sync::Mutex;
 use rusqlite::{Connection, OptionalExtension, params, params_from_iter};
 
 use crate::error::ApiError;
-use crate::models::{AccountUsage, LogStatsGroup, LogStatsTotals, ModelInfo, now_secs};
+use crate::models::{
+    AccountType, AccountUsage, LogStatsGroup, LogStatsTotals, ModelInfo, now_secs,
+};
 
-const COLUMNS: &str = "id, name, base_url, api_key_enc, tags, notes, model_cache, is_default, created_at, updated_at, proxy_id, is_enabled, cookie_enc, workspace_id";
+const COLUMNS: &str = "id, name, base_url, api_key_enc, tags, notes, model_cache, is_default, created_at, updated_at, proxy_id, is_enabled, cookie_enc, workspace_id, account_type";
 
 /// Qualify every `api_keys` column for queries that LEFT JOIN `proxies`
 /// (`id`, `name`, `created_at`, `updated_at` exist in both tables).
 const KEY_SELECT: &str = "api_keys.id, api_keys.name, api_keys.base_url, api_keys.api_key_enc, api_keys.tags, \
      api_keys.notes, api_keys.model_cache, api_keys.is_default, api_keys.created_at, \
      api_keys.updated_at, api_keys.proxy_id, api_keys.is_enabled, api_keys.cookie_enc, api_keys.workspace_id, \
-     api_keys.usage_cache";
+     api_keys.usage_cache, api_keys.account_type";
 
 /// Fields that can be written for a key. `api_key_enc` is the already-encrypted blob.
 #[derive(Debug, Clone)]
@@ -25,6 +27,7 @@ pub struct KeyData {
     pub notes: String,
     pub is_default: bool,
     pub is_enabled: bool,
+    pub account_type: AccountType,
     pub proxy_id: Option<String>,
     pub cookie_enc: Option<String>,
     pub workspace_id: Option<String>,
@@ -42,6 +45,7 @@ pub struct KeyRow {
     pub model_cache: Vec<ModelInfo>,
     pub _is_default: bool,
     pub is_enabled: bool,
+    pub account_type: AccountType,
     pub created_at: i64,
     pub updated_at: i64,
     pub proxy_id: Option<String>,
@@ -114,6 +118,10 @@ fn row_to_key(r: &rusqlite::Row) -> rusqlite::Result<KeyRow> {
     let tags_json: String = r.get(4)?;
     let models_json: String = r.get(6)?;
     let usage_json: Option<String> = r.get(14)?;
+    let account_type = match r.get::<_, String>(15)?.as_str() {
+        "go" => AccountType::Go,
+        _ => AccountType::Normal,
+    };
     Ok(KeyRow {
         id: r.get(0)?,
         name: r.get(1)?,
@@ -127,10 +135,11 @@ fn row_to_key(r: &rusqlite::Row) -> rusqlite::Result<KeyRow> {
         updated_at: r.get(9)?,
         proxy_id: r.get(10)?,
         is_enabled: r.get::<_, i64>(11)? != 0,
+        account_type,
         cookie_enc: r.get(12)?,
         workspace_id: r.get(13)?,
         usage_cache: usage_json.and_then(|value| serde_json::from_str(&value).ok()),
-        proxy_name: r.get(15)?,
+        proxy_name: r.get(16)?,
     })
 }
 
@@ -412,7 +421,7 @@ impl Db {
         }
         tx.execute(
             &format!(
-                "INSERT INTO api_keys ({COLUMNS}) VALUES (?1,?2,?3,?4,?5,?6,'[]',?7,?8,?8,?9,?10,?11,?12)"
+                "INSERT INTO api_keys ({COLUMNS}) VALUES (?1,?2,?3,?4,?5,?6,'[]',?7,?8,?8,?9,?10,?11,?12,?13)"
             ),
             params![
                 id,
@@ -427,6 +436,7 @@ impl Db {
                 data.is_enabled as i64,
                 data.cookie_enc,
                 data.workspace_id,
+                data.account_type.as_str(),
             ],
         )?;
         tx.commit()?;
@@ -455,7 +465,7 @@ impl Db {
         tx.execute(
             &format!(
                 "UPDATE api_keys SET name=?2, base_url=?3, api_key_enc=?4, tags=?5, notes=?6,
-                 is_default=?7, updated_at=?8, proxy_id=?9, is_enabled=?10 WHERE id=?1"
+                 is_default=?7, updated_at=?8, proxy_id=?9, is_enabled=?10, account_type=?11 WHERE id=?1"
             ),
             params![
                 id,
@@ -468,6 +478,7 @@ impl Db {
                 now,
                 data.proxy_id,
                 data.is_enabled as i64,
+                data.account_type.as_str(),
             ],
         )?;
         tx.commit()?;
@@ -484,7 +495,7 @@ impl Db {
         let mut conn = self.0.lock().unwrap();
         let tx = conn.transaction()?;
         let n = tx.execute(
-            "UPDATE api_keys SET base_url=?2, api_key_enc=?3, tags=?4, notes=?5, updated_at=?6, proxy_id=?7, is_enabled=?8
+            "UPDATE api_keys SET base_url=?2, api_key_enc=?3, tags=?4, notes=?5, updated_at=?6, proxy_id=?7, is_enabled=?8, account_type=?9
              WHERE name=?1 COLLATE NOCASE",
             params![
                 name,
@@ -494,7 +505,8 @@ impl Db {
                 data.notes,
                 now,
                 data.proxy_id,
-                data.is_enabled as i64
+                data.is_enabled as i64,
+                data.account_type.as_str(),
             ],
         )?;
         tx.commit()?;
@@ -516,6 +528,20 @@ impl Db {
                  updated_at = ?3
              WHERE id = ?1",
             params![id, enabled as i64, now],
+        )?;
+        Ok(changed > 0)
+    }
+
+    pub fn set_account_type(
+        &self,
+        id: &str,
+        account_type: AccountType,
+        now: i64,
+    ) -> Result<bool, ApiError> {
+        let conn = self.0.lock().unwrap();
+        let changed = conn.execute(
+            "UPDATE api_keys SET account_type = ?2, updated_at = ?3 WHERE id = ?1",
+            params![id, account_type.as_str(), now],
         )?;
         Ok(changed > 0)
     }

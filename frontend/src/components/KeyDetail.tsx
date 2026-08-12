@@ -23,6 +23,7 @@ export default function KeyDetail({ summary, onClose, onEdit, onDelete, onSetEna
   const [loadErr, setLoadErr] = useState('')
   const [usage, setUsage] = useState<AccountUsage | null>(summary.usage_cache)
   const [usageLoading, setUsageLoading] = useState(false)
+  const [accountType, setAccountType] = useState(summary.account_type)
   const queryClient = useQueryClient()
 
   useEffect(() => {
@@ -30,7 +31,10 @@ export default function KeyDetail({ summary, onClose, onEdit, onDelete, onSetEna
     keysApi
       .get(summary.id)
       .then((r) => {
-        if (alive) setRecord(r)
+        if (alive) {
+          setRecord(r)
+          setAccountType(r.account_type)
+        }
       })
       .catch((e) => alive && setLoadErr(e instanceof Error ? e.message : '加载失败'))
     return () => {
@@ -66,8 +70,10 @@ export default function KeyDetail({ summary, onClose, onEdit, onDelete, onSetEna
     try {
       const nextUsage = await keysApi.usage(summary.id)
       setUsage(nextUsage)
+      const nextAccountType = nextUsage.plan_name.toLowerCase().includes('go') ? 'go' : accountType
+      setAccountType(nextAccountType)
       queryClient.setQueryData<KeySummary[]>(keysQueryKey, (current) =>
-        current?.map((item) => item.id === summary.id ? { ...item, usage_cache: nextUsage } : item),
+        current?.map((item) => item.id === summary.id ? { ...item, usage_cache: nextUsage, account_type: nextAccountType } : item),
       )
     } catch (e) {
       toast(e instanceof Error ? e.message : '额度查询失败', 'err')
@@ -82,6 +88,7 @@ export default function KeyDetail({ summary, onClose, onEdit, onDelete, onSetEna
       <div className="drawer" onClick={(e) => e.stopPropagation()}>
         <div className="drawer-head">
           <h2>{summary.name}</h2>
+          <span className={`account-type-badge ${accountType === 'go' ? 'go' : ''}`}>{accountType === 'go' ? 'GO 订阅' : '普通账号'}</span>
           {!summary.is_enabled && <span className="disabled-badge">已禁用</span>}
           <button className="btn btn-ghost btn-sm" onClick={onClose} aria-label="关闭">
             <XIcon size={16} />
@@ -182,6 +189,11 @@ export default function KeyDetail({ summary, onClose, onEdit, onDelete, onSetEna
 
           <div className="section-label">操作</div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {accountType === 'normal' && (
+              <a className="btn btn-primary" title="在 OpenCode 官方页面选择可用付款方式" href={summary.workspace_id ? `https://opencode.ai/workspace/${encodeURIComponent(summary.workspace_id)}/go` : 'https://opencode.ai/auth'} target="_blank" rel="noreferrer">
+                订阅 Go
+              </a>
+            )}
             <button className={summary.is_enabled ? 'btn' : 'btn btn-enable'} onClick={() => onSetEnabled(summary.id, !summary.is_enabled)}>
               <PowerIcon size={13} /> {summary.is_enabled ? '禁用账号' : '启用账号'}
             </button>

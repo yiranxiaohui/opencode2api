@@ -34,6 +34,7 @@ pub async fn export(
             tags: row.tags,
             notes: row.notes,
             is_enabled: row.is_enabled,
+            account_type: row.account_type,
             proxy: row.proxy_name,
         });
     }
@@ -106,6 +107,7 @@ pub async fn import(
             notes: item.notes,
             is_default: false,
             is_enabled: item.is_enabled,
+            account_type: item.account_type,
             proxy_id,
             cookie_enc: None,
             workspace_id: None,

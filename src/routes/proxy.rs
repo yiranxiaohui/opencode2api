@@ -629,7 +629,7 @@ mod tests {
         select_sticky_account, should_forward_stream,
     };
     use crate::db::KeyRow;
-    use crate::models::ModelInfo;
+    use crate::models::{AccountType, ModelInfo};
     use axum::body::Bytes;
     use axum::http::{HeaderMap, StatusCode};
 
@@ -650,6 +650,7 @@ mod tests {
                 .collect(),
             _is_default: false,
             is_enabled: true,
+            account_type: AccountType::Normal,
             created_at: 0,
             updated_at: 0,
             proxy_id: None,

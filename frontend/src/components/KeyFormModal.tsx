@@ -16,6 +16,7 @@ export default function KeyFormModal({ initial, proxies = [], busy, onClose, onS
   const [tags, setTags] = useState(initial?.tags.join(', ') ?? '')
   const [notes, setNotes] = useState(initial?.notes ?? '')
   const [proxyId, setProxyId] = useState(initial?.proxy_id ?? '')
+  const [accountType, setAccountType] = useState<'normal' | 'go'>(initial?.account_type ?? 'normal')
   const [err, setErr] = useState('')
 
   const submit = (e: React.FormEvent) => {
@@ -31,6 +32,7 @@ export default function KeyFormModal({ initial, proxies = [], busy, onClose, onS
         .map((t) => t.trim())
         .filter(Boolean),
       notes: notes.trim(),
+      account_type: accountType,
       proxy_id: proxyId || null,
     })
   }
@@ -66,6 +68,13 @@ export default function KeyFormModal({ initial, proxies = [], busy, onClose, onS
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
               />
+            </div>
+            <div className="field">
+              <label>账号类型</label>
+              <select className="input" value={accountType} onChange={(e) => setAccountType(e.target.value as 'normal' | 'go')}>
+                <option value="normal">普通账号</option>
+                <option value="go">Go 订阅账号</option>
+              </select>
             </div>
             <div className="field">
               <label>标签</label>

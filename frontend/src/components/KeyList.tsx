@@ -29,6 +29,7 @@ export default function KeyList({ keys, selectedId, onOpen, onTest, onEdit, onDe
   const [query, setQuery] = useState('')
   const [activeTag, setActiveTag] = useState<string | null>(null)
   const [status, setStatus] = useState<'all' | 'active' | 'cooldown' | 'disabled'>('all')
+  const [accountType, setAccountType] = useState<'all' | 'normal' | 'go'>('all')
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000))
   const [queryingIds, setQueryingIds] = useState<Set<string>>(() => new Set())
   const [inviteId, setInviteId] = useState<string | null>(null)
@@ -80,6 +81,7 @@ export default function KeyList({ keys, selectedId, onOpen, onTest, onEdit, onDe
     const q = query.trim().toLowerCase()
     return keys.filter((k) => {
       if (activeTag && !k.tags.includes(activeTag)) return false
+      if (accountType !== 'all' && k.account_type !== accountType) return false
       if (status === 'active' && (!k.is_enabled || isCooling(k, now))) return false
       if (status === 'cooldown' && !isCooling(k, now)) return false
       if (status === 'disabled' && k.is_enabled) return false
@@ -88,7 +90,7 @@ export default function KeyList({ keys, selectedId, onOpen, onTest, onEdit, onDe
         k.name.toLowerCase().includes(q) || k.notes.toLowerCase().includes(q)
       )
     })
-  }, [keys, query, activeTag, status, now])
+  }, [keys, query, activeTag, status, accountType, now])
 
   return (
     <>
@@ -132,6 +134,16 @@ export default function KeyList({ keys, selectedId, onOpen, onTest, onEdit, onDe
             {label}
           </button>
         ))}
+        <span className="filter-divider" />
+        {([
+          ['all', '所有类型'],
+          ['normal', '普通账号'],
+          ['go', 'Go 订阅'],
+        ] as const).map(([value, label]) => (
+          <button key={value} className={`tag-chip ${accountType === value ? 'on' : ''}`} onClick={() => setAccountType(value)}>
+            {label}
+          </button>
+        ))}
       </div>
 
       <div className="panel row-list">
@@ -157,6 +169,7 @@ export default function KeyList({ keys, selectedId, onOpen, onTest, onEdit, onDe
             <span className={`led ${!k.is_enabled ? '' : cooling ? 'warn' : 'ok'}`} title={statusLabel(k, now)} />
             <div className="key-name">
               <span className="nm">{k.name}</span>
+              <span className={`account-type-badge ${k.account_type === 'go' ? 'go' : ''}`}>{k.account_type === 'go' ? 'GO' : '普通'}</span>
               {!k.is_enabled && <span className="disabled-badge">已禁用</span>}
               {cooling && <span className="cooldown-badge">{statusLabel(k, now)}</span>}
               {k.is_enabled && !cooling && <span className="active-badge">正常</span>}

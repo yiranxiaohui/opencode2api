@@ -109,6 +109,7 @@ pub async fn create(
             notes: input.notes,
             is_default: false,
             is_enabled: true,
+            account_type: input.account_type.unwrap_or_default(),
             proxy_id,
             cookie_enc: None,
             workspace_id: None,
@@ -169,6 +170,7 @@ pub async fn update(
             notes: input.notes,
             is_default: false,
             is_enabled: existing.is_enabled,
+            account_type: input.account_type.unwrap_or(existing.account_type),
             proxy_id,
             cookie_enc: existing.cookie_enc.clone(),
             workspace_id: existing.workspace_id.clone(),
@@ -215,6 +217,7 @@ pub async fn import_cookie(
             notes: "Cookie 导入".into(),
             is_default: false,
             is_enabled: true,
+            account_type: input.account_type,
             proxy_id,
             cookie_enc: Some(st.encrypt_secret(&cookie).await?),
             workspace_id: Some(workspace_id),
@@ -258,6 +261,10 @@ pub async fn usage(
     let client = st.client_for_key(&row).await?;
     let usage = crate::opencode_account::usage(&client, &cookie, workspace).await?;
     st.db.set_usage_cache(&id, &usage)?;
+    if usage.plan_name.to_lowercase().contains("go") {
+        st.db
+            .set_account_type(&id, crate::models::AccountType::Go, now_secs())?;
+    }
     Ok(Json(usage))
 }
 

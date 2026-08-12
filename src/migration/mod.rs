@@ -428,6 +428,49 @@ mod m20260812_000009_add_disabled_models {
     }
 }
 
+mod m20260812_000010_add_account_type {
+    use sea_orm_migration::prelude::*;
+    use sea_orm_migration::sea_orm::{DbBackend, Statement};
+
+    pub struct Migration;
+    impl MigrationName for Migration {
+        fn name(&self) -> &str {
+            "m20260812_000010_add_account_type"
+        }
+    }
+    #[async_trait::async_trait]
+    impl MigrationTrait for Migration {
+        async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            let connection = manager.get_connection();
+            let columns = connection
+                .query_all(Statement::from_string(
+                    DbBackend::Sqlite,
+                    "PRAGMA table_info('api_keys')".to_owned(),
+                ))
+                .await?;
+            let has_account_type = columns
+                .iter()
+                .any(|row| row.try_get::<String>("", "name").as_deref() == Ok("account_type"));
+            if !has_account_type {
+                connection
+                    .execute_unprepared(
+                        "ALTER TABLE api_keys ADD COLUMN account_type TEXT NOT NULL DEFAULT 'normal' CHECK(account_type IN ('normal', 'go'))",
+                    )
+                    .await?;
+            }
+            Ok(())
+        }
+
+        async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            manager
+                .get_connection()
+                .execute_unprepared("ALTER TABLE api_keys DROP COLUMN account_type")
+                .await?;
+            Ok(())
+        }
+    }
+}
+
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -443,6 +486,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260811_000007_add_account_cookie::Migration),
             Box::new(m20260811_000008_add_account_usage_cache::Migration),
             Box::new(m20260812_000009_add_disabled_models::Migration),
+            Box::new(m20260812_000010_add_account_type::Migration),
         ]
     }
 }
@@ -521,12 +565,20 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(applied, 9);
+        assert_eq!(applied, 10);
         assert_eq!(has_proxy_id, 1);
         assert_eq!(has_client_key_enc, 1);
         assert_eq!(has_is_enabled, 1);
         assert_eq!(has_cookie, 2);
         assert_eq!(has_usage_cache, 1);
+        let has_account_type: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('api_keys') WHERE name = 'account_type'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(has_account_type, 1);
         let has_disabled_models: i64 = connection
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='disabled_models'",
@@ -608,6 +660,14 @@ mod tests {
         assert_eq!(has_client_key_enc, 1);
         assert_eq!(is_enabled, 1);
         assert_eq!(has_usage_cache, 1);
+        let account_type: String = connection
+            .query_row(
+                "SELECT account_type FROM api_keys WHERE id = 'existing'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(account_type, "normal");
 
         drop(connection);
         std::fs::remove_file(path).unwrap();
