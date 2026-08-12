@@ -6,6 +6,7 @@ import type {
   AccountUsage,
   ExportPayload,
   ImportResult,
+  InviteLinksExport,
   KeyInput,
   KeyRecord,
   KeySummary,
@@ -37,6 +38,7 @@ export const keysApi = {
   import: (payload: unknown) => post<ImportResult>('/api/import', payload),
   importCookie: (input: CookieImportInput) => post<KeyRecord>('/api/keys/import-cookie', input),
   usage: (id: string) => get<AccountUsage>(`/api/keys/${id}/usage`),
+  exportInviteLinks: () => get<InviteLinksExport>('/api/keys/export-invite-links'),
 }
 
 export const proxiesApi = {

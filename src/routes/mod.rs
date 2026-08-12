@@ -41,6 +41,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/chat/{*path}", any(proxy::chat_proxy))
         .route("/keys", get(keys::list).post(keys::create))
         .route("/keys/import-cookie", post(keys::import_cookie))
+        .route("/keys/export-invite-links", get(keys::export_invite_links))
         .route(
             "/keys/{id}",
             get(keys::get_key).put(keys::update).delete(keys::delete),

@@ -240,6 +240,39 @@ pub async fn usage(
     Ok(build(plan_name, &subscription, &billing))
 }
 
+pub async fn invite_link(
+    client: &Client,
+    cookie: &str,
+    workspace: &str,
+) -> Result<String, ApiError> {
+    let response = get(
+        client,
+        &format!("{ORIGIN}/workspace/{workspace}/go"),
+        cookie,
+    )
+    .await?;
+    if !response.status().is_success() {
+        return Err(ApiError::BadRequest(format!(
+            "读取邀请链接失败: HTTP {}",
+            response.status()
+        )));
+    }
+    let body = response
+        .text()
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    extract_invite_link(&body)
+        .ok_or_else(|| ApiError::BadRequest("未找到邀请链接，请确认账号支持邀请功能".into()))
+}
+
+fn extract_invite_link(body: &str) -> Option<String> {
+    let decoded = body.replace("&amp;", "&").replace("\\u0026", "&");
+    Regex::new(r#"https://opencode\.ai/go\?ref=[A-Za-z0-9_-]+"#)
+        .ok()?
+        .find(&decoded)
+        .map(|value| value.as_str().to_string())
+}
+
 fn build(plan_name: String, subscription: &str, billing: &str) -> AccountUsage {
     AccountUsage {
         plan_name,
@@ -285,6 +318,17 @@ mod tests {
         assert_eq!(
             extract_email(r#"{\"email\":\"User@Example.com\"}"#).as_deref(),
             Some("user@example.com")
+        );
+    }
+
+    #[test]
+    fn extracts_invite_link_from_rendered_page() {
+        assert_eq!(
+            extract_invite_link(
+                r#"<script>const url=\"https://opencode.ai/go?ref=abc_123-XYZ\"</script>"#
+            )
+            .as_deref(),
+            Some("https://opencode.ai/go?ref=abc_123-XYZ")
         );
     }
 }

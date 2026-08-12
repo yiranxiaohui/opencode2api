@@ -10,8 +10,9 @@ use crate::db::KeyData;
 use crate::error::ApiError;
 use crate::middleware::Unlocked;
 use crate::models::{
-    AccountUsage, CookieImportInput, KeyEnabledInput, KeyInput, KeyRecord, KeySummary, ModelInfo,
-    OPENCODE_BASE_URL, OkResponse, TestResult, now_secs,
+    AccountUsage, CookieImportInput, InviteLinkResult, InviteLinksExport, KeyEnabledInput,
+    KeyInput, KeyRecord, KeySummary, ModelInfo, OPENCODE_BASE_URL, OkResponse, TestResult,
+    now_secs,
 };
 use crate::state::AppState;
 
@@ -253,6 +254,52 @@ pub async fn usage(
     let usage = crate::opencode_account::usage(&client, &cookie, workspace).await?;
     st.db.set_usage_cache(&id, &usage)?;
     Ok(Json(usage))
+}
+
+pub async fn export_invite_links(
+    State(st): State<AppState>,
+    _: Unlocked,
+) -> Result<Json<InviteLinksExport>, ApiError> {
+    let accounts: Vec<_> = st
+        .db
+        .list_keys()?
+        .into_iter()
+        .filter(|row| row.cookie_enc.is_some() && row.workspace_id.is_some())
+        .collect();
+    let results = futures_util::future::join_all(accounts.into_iter().map(|row| {
+        let st = st.clone();
+        async move {
+            let result = async {
+                let cookie = st
+                    .decrypt_secret(row.cookie_enc.as_deref().unwrap())
+                    .await?;
+                let client = st.client_for_key(&row).await?;
+                crate::opencode_account::invite_link(
+                    &client,
+                    &cookie,
+                    row.workspace_id.as_deref().unwrap(),
+                )
+                .await
+            }
+            .await;
+            match result {
+                Ok(invite_link) => InviteLinkResult {
+                    account_id: row.id,
+                    account_name: row.name,
+                    invite_link: Some(invite_link),
+                    error: None,
+                },
+                Err(error) => InviteLinkResult {
+                    account_id: row.id,
+                    account_name: row.name,
+                    invite_link: None,
+                    error: Some(error.to_string()),
+                },
+            }
+        }
+    }))
+    .await;
+    Ok(Json(InviteLinksExport { results }))
 }
 
 pub async fn delete(

@@ -55,6 +55,15 @@ export interface AccountUsage {
   rolling: UsageWindow | null; weekly: UsageWindow | null; monthly: UsageWindow | null; fetched_at: number
 }
 
+export interface InviteLinkResult {
+  account_id: string
+  account_name: string
+  invite_link: string | null
+  error: string | null
+}
+
+export interface InviteLinksExport { results: InviteLinkResult[] }
+
 export interface ExportItem {
   name: string
   base_url?: string

@@ -141,6 +141,19 @@ pub struct AccountUsage {
     pub fetched_at: i64,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct InviteLinkResult {
+    pub account_id: String,
+    pub account_name: String,
+    pub invite_link: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct InviteLinksExport {
+    pub results: Vec<InviteLinkResult>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyExport {
     pub name: String,
