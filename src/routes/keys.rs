@@ -10,9 +10,8 @@ use crate::db::KeyData;
 use crate::error::ApiError;
 use crate::middleware::Unlocked;
 use crate::models::{
-    AccountUsage, CookieImportInput, InviteLinkResult, InviteLinksExport, KeyEnabledInput,
-    KeyInput, KeyRecord, KeySummary, ModelInfo, OPENCODE_BASE_URL, OkResponse, TestResult,
-    now_secs,
+    AccountUsage, CookieImportInput, InviteLinkResult, KeyEnabledInput, KeyInput, KeyRecord,
+    KeySummary, ModelInfo, OPENCODE_BASE_URL, OkResponse, TestResult, now_secs,
 };
 use crate::state::AppState;
 
@@ -256,50 +255,30 @@ pub async fn usage(
     Ok(Json(usage))
 }
 
-pub async fn export_invite_links(
+pub async fn get_invite_link(
     State(st): State<AppState>,
     _: Unlocked,
-) -> Result<Json<InviteLinksExport>, ApiError> {
-    let accounts: Vec<_> = st
+    Path(id): Path<String>,
+) -> Result<Json<InviteLinkResult>, ApiError> {
+    let row = st
         .db
-        .list_keys()?
-        .into_iter()
-        .filter(|row| row.cookie_enc.is_some() && row.workspace_id.is_some())
-        .collect();
-    let results = futures_util::future::join_all(accounts.into_iter().map(|row| {
-        let st = st.clone();
-        async move {
-            let result = async {
-                let cookie = st
-                    .decrypt_secret(row.cookie_enc.as_deref().unwrap())
-                    .await?;
-                let client = st.client_for_key(&row).await?;
-                crate::opencode_account::invite_link(
-                    &client,
-                    &cookie,
-                    row.workspace_id.as_deref().unwrap(),
-                )
-                .await
-            }
-            .await;
-            match result {
-                Ok(invite_link) => InviteLinkResult {
-                    account_id: row.id,
-                    account_name: row.name,
-                    invite_link: Some(invite_link),
-                    error: None,
-                },
-                Err(error) => InviteLinkResult {
-                    account_id: row.id,
-                    account_name: row.name,
-                    invite_link: None,
-                    error: Some(error.to_string()),
-                },
-            }
-        }
+        .get_key(&id)?
+        .ok_or_else(|| ApiError::NotFound("key not found".into()))?;
+    let cookie_enc = row.cookie_enc.as_deref().ok_or_else(|| {
+        ApiError::BadRequest("该账号不是通过 Cookie 导入，无法获取邀请链接".into())
+    })?;
+    let workspace = row
+        .workspace_id
+        .as_deref()
+        .ok_or_else(|| ApiError::Internal("账号缺少 workspace".into()))?;
+    let cookie = st.decrypt_secret(cookie_enc).await?;
+    let client = st.client_for_key(&row).await?;
+    let invite_link = crate::opencode_account::invite_link(&client, &cookie, workspace).await?;
+    Ok(Json(InviteLinkResult {
+        account_id: row.id,
+        account_name: row.name,
+        invite_link,
     }))
-    .await;
-    Ok(Json(InviteLinksExport { results }))
 }
 
 pub async fn delete(

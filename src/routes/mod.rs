@@ -43,13 +43,13 @@ pub fn build_router(state: AppState) -> Router {
         .route("/chat/{*path}", any(proxy::chat_proxy))
         .route("/keys", get(keys::list).post(keys::create))
         .route("/keys/import-cookie", post(keys::import_cookie))
-        .route("/keys/export-invite-links", get(keys::export_invite_links))
         .route(
             "/keys/{id}",
             get(keys::get_key).put(keys::update).delete(keys::delete),
         )
         .route("/keys/{id}/test", post(keys::test))
         .route("/keys/{id}/usage", get(keys::usage))
+        .route("/keys/{id}/invite-link", get(keys::get_invite_link))
         .route("/keys/{id}/set-enabled", post(keys::set_enabled))
         .route("/proxies", get(proxies::list).post(proxies::create))
         .route(

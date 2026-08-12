@@ -96,7 +96,7 @@ print(client.chat.completions.create(
 | `POST` | `/api/keys/{id}/test` | 连通性测试（`{ok, latency_ms, models}`） |
 | `POST` | `/api/keys/{id}/set-enabled` | 启用或禁用账号 |
 | `GET` | `/api/keys/{id}/usage` | 查询通过 Cookie 导入账号的套餐额度 |
-| `GET` | `/api/keys/export-invite-links` | 批量获取并导出 Cookie 账号的邀请链接 |
+| `GET` | `/api/keys/{id}/invite-link` | 获取单个 Cookie 账号的邀请链接 |
 | `GET` | `/api/models` | 获取模型管理列表及启用状态 |
 | `POST` | `/api/models/set-enabled` | 全局启用或禁用指定模型 |
 | `GET`/`POST`/`DELETE` | `/api/client-keys[/{id}]` | 管理客户端访问密钥 |

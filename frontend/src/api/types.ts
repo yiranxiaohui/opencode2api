@@ -63,11 +63,8 @@ export interface AccountUsage {
 export interface InviteLinkResult {
   account_id: string
   account_name: string
-  invite_link: string | null
-  error: string | null
+  invite_link: string
 }
-
-export interface InviteLinksExport { results: InviteLinkResult[] }
 
 export interface ExportItem {
   name: string

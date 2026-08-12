@@ -53,36 +53,8 @@ export default function ImportExportBar({ onImport }: Props) {
     }
   }
 
-  const doExportInviteLinks = async () => {
-    setBusy(true)
-    try {
-      const payload = await keysApi.exportInviteLinks()
-      const succeeded = payload.results.filter((item) => item.invite_link)
-      const failed = payload.results.length - succeeded.length
-      if (succeeded.length === 0) {
-        toast(payload.results.length === 0 ? '没有通过 Cookie 导入的账号' : '没有获取到可用邀请链接', 'err')
-        return
-      }
-      const text = succeeded.map((item) => `${item.account_name}\t${item.invite_link}`).join('\n') + '\n'
-      const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }))
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `opencode-invite-links-${new Date().toISOString().slice(0, 10)}.txt`
-      a.click()
-      URL.revokeObjectURL(url)
-      toast(`已导出 ${succeeded.length} 条邀请链接${failed ? `，${failed} 条获取失败` : ''}`, failed ? 'info' : 'ok')
-    } catch (e) {
-      toast(e instanceof Error ? e.message : '邀请链接导出失败', 'err')
-    } finally {
-      setBusy(false)
-    }
-  }
-
   return (
     <>
-      <button className="btn" onClick={doExportInviteLinks} disabled={busy} title="导出 Cookie 账号的邀请链接">
-        <DownloadIcon size={13} /> {busy ? '获取中…' : '导出邀请链接'}
-      </button>
       <button className="btn" onClick={doExport} title="导出为 JSON（含明文 Key）">
         <DownloadIcon size={13} /> 导出
       </button>

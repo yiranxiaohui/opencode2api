@@ -3,8 +3,8 @@ import { useQueryClient } from '@tanstack/react-query'
 import { keysApi } from '../api/keys'
 import type { KeySummary } from '../api/types'
 import { keysQueryKey } from '../hooks/useKeys'
-import { toast } from '../lib/toast'
-import { BoltIcon, EditIcon, PowerIcon, RefreshIcon, SearchIcon, TrashIcon } from './icons'
+import { copyWithToast, toast } from '../lib/toast'
+import { BoltIcon, CopyIcon, EditIcon, PowerIcon, RefreshIcon, SearchIcon, TrashIcon } from './icons'
 
 interface Props {
   keys: KeySummary[]
@@ -20,6 +20,7 @@ export default function KeyList({ keys, selectedId, onOpen, onTest, onEdit, onDe
   const [query, setQuery] = useState('')
   const [activeTag, setActiveTag] = useState<string | null>(null)
   const [queryingIds, setQueryingIds] = useState<Set<string>>(() => new Set())
+  const [inviteId, setInviteId] = useState<string | null>(null)
   const queryClient = useQueryClient()
 
   const loadUsage = async (key: KeySummary) => {
@@ -38,6 +39,18 @@ export default function KeyList({ keys, selectedId, onOpen, onTest, onEdit, onDe
         next.delete(key.id)
         return next
       })
+    }
+  }
+
+  const copyInviteLink = async (key: KeySummary) => {
+    setInviteId(key.id)
+    try {
+      const result = await keysApi.inviteLink(key.id)
+      copyWithToast(result.invite_link, `${key.name} 的邀请链接已复制`)
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '邀请链接获取失败', 'err')
+    } finally {
+      setInviteId(null)
     }
   }
 
@@ -151,6 +164,9 @@ export default function KeyList({ keys, selectedId, onOpen, onTest, onEdit, onDe
               {k.model_count > 0 ? `${k.model_count} 模型` : '未同步'}
             </div>
             <div className="row-actions" onClick={(e) => e.stopPropagation()}>
+              {k.has_cookie && <button className="btn btn-sm" disabled={inviteId === k.id} title="复制邀请链接" onClick={() => void copyInviteLink(k)}>
+                <CopyIcon size={13} />
+              </button>}
               <button className="btn btn-sm" title="连通性测试" onClick={() => onTest(k)}>
                 <BoltIcon size={13} />
               </button>
