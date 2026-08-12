@@ -34,4 +34,6 @@ Recent commits use short, imperative subjects such as `Add cache token usage to 
 
 ## Required Development Workflow
 
-For every code change, start from an up-to-date `master` and create a dedicated feature or fix branch. Implement and verify the change on that branch using the relevant formatting, lint, test, and build commands. Create a focused commit, merge the completed branch into local `master`, and push `master` to `origin`. After the merge and push succeed, delete the merged local branch and delete its remote branch if one exists. Do not modify code directly on `master` unless the user explicitly requests an exception. At handoff, report the working branch, commit hash, checks run, merge result, push status, and branch cleanup result.
+For every code change, first update local `master` from `origin/master`, then create a dedicated feature or fix branch in its own Git worktree. All implementation, formatting, testing, and commits must happen inside that isolated worktree; do not edit code in the primary worktree or directly on `master` unless the user explicitly requests an exception.
+
+After verification, create a focused commit, merge the completed branch into local `master`, and push `master` to `origin`. Once the merge and push succeed, remove the task worktree, delete the merged local branch, and delete its remote branch if one exists. At handoff, report the worktree path, working branch, commit hash, checks run, merge result, push status, worktree removal, and branch cleanup result.
