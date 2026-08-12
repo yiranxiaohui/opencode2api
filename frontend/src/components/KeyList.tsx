@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { keysApi } from '../api/keys'
 import type { KeySummary } from '../api/types'
@@ -16,12 +16,28 @@ interface Props {
   onSetEnabled: (id: string, enabled: boolean) => void
 }
 
+const isCooling = (key: KeySummary, now: number) =>
+  key.is_enabled && key.cooldown_until != null && key.cooldown_until > now
+
+const statusLabel = (key: KeySummary, now: number) => {
+  if (!key.is_enabled) return '已禁用'
+  if (isCooling(key, now)) return `冷却中 · ${Math.max(1, Math.ceil((key.cooldown_until! - now) / 60))} 分钟`
+  return '正常'
+}
+
 export default function KeyList({ keys, selectedId, onOpen, onTest, onEdit, onDelete, onSetEnabled }: Props) {
   const [query, setQuery] = useState('')
   const [activeTag, setActiveTag] = useState<string | null>(null)
+  const [status, setStatus] = useState<'all' | 'active' | 'cooldown' | 'disabled'>('all')
+  const [now, setNow] = useState(() => Math.floor(Date.now() / 1000))
   const [queryingIds, setQueryingIds] = useState<Set<string>>(() => new Set())
   const [inviteId, setInviteId] = useState<string | null>(null)
   const queryClient = useQueryClient()
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1_000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   const loadUsage = async (key: KeySummary) => {
     setQueryingIds((current) => new Set(current).add(key.id))
@@ -64,12 +80,15 @@ export default function KeyList({ keys, selectedId, onOpen, onTest, onEdit, onDe
     const q = query.trim().toLowerCase()
     return keys.filter((k) => {
       if (activeTag && !k.tags.includes(activeTag)) return false
+      if (status === 'active' && (!k.is_enabled || isCooling(k, now))) return false
+      if (status === 'cooldown' && !isCooling(k, now)) return false
+      if (status === 'disabled' && k.is_enabled) return false
       if (!q) return true
       return (
         k.name.toLowerCase().includes(q) || k.notes.toLowerCase().includes(q)
       )
     })
-  }, [keys, query, activeTag])
+  }, [keys, query, activeTag, status, now])
 
   return (
     <>
@@ -102,6 +121,19 @@ export default function KeyList({ keys, selectedId, onOpen, onTest, onEdit, onDe
         </div>
       </div>
 
+      <div className="status-filters" aria-label="账号状态筛选">
+        {([
+          ['all', '全部'],
+          ['active', '正常'],
+          ['cooldown', '冷却中'],
+          ['disabled', '已禁用'],
+        ] as const).map(([value, label]) => (
+          <button key={value} className={`tag-chip ${status === value ? 'on' : ''}`} onClick={() => setStatus(value)}>
+            {label}
+          </button>
+        ))}
+      </div>
+
       <div className="panel row-list">
         {filtered.length === 0 && (
           <div className="empty">
@@ -112,6 +144,7 @@ export default function KeyList({ keys, selectedId, onOpen, onTest, onEdit, onDe
         {filtered.map((k) => {
           const usage = k.usage_cache
           const isQuerying = queryingIds.has(k.id)
+          const cooling = isCooling(k, now)
           return (
             <div
               key={k.id}
@@ -121,10 +154,12 @@ export default function KeyList({ keys, selectedId, onOpen, onTest, onEdit, onDe
               onClick={() => onOpen(k)}
               onKeyDown={(e) => e.key === 'Enter' && onOpen(k)}
             >
-            <span className={`led ${k.is_enabled ? 'ok' : ''}`} title={k.is_enabled ? '已启用' : '已禁用'} />
+            <span className={`led ${!k.is_enabled ? '' : cooling ? 'warn' : 'ok'}`} title={statusLabel(k, now)} />
             <div className="key-name">
               <span className="nm">{k.name}</span>
               {!k.is_enabled && <span className="disabled-badge">已禁用</span>}
+              {cooling && <span className="cooldown-badge">{statusLabel(k, now)}</span>}
+              {k.is_enabled && !cooling && <span className="active-badge">正常</span>}
               {k.proxy_name && <span className="proxy-badge">🌐 {k.proxy_name}</span>}
             </div>
             <div className="key-usage">

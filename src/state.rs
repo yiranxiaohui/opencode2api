@@ -118,6 +118,20 @@ impl AppState {
             .is_some_and(|until| now < *until)
     }
 
+    /// Return the cooldown deadline when it is still active. Expired entries
+    /// are removed opportunistically so the in-memory map stays bounded.
+    pub fn quota_cooldown_until(&self, id: &str, now: i64) -> Option<i64> {
+        let mut map = self.cooldowns.lock().unwrap();
+        match map.get(id).copied() {
+            Some(until) if now < until => Some(until),
+            Some(_) => {
+                map.remove(id);
+                None
+            }
+            None => None,
+        }
+    }
+
     pub async fn decrypt_secret(&self, enc: &str) -> Result<Zeroizing<String>, ApiError> {
         let guard = self.master_key.read().await;
         let key = guard.as_ref().ok_or(ApiError::Locked)?;
@@ -161,7 +175,12 @@ mod tests {
         assert!(!st.in_quota_cooldown("a", now));
         st.begin_cooldown("a");
         assert!(st.in_quota_cooldown("a", now));
+        assert!(st.quota_cooldown_until("a", now).is_some());
         assert!(!st.in_quota_cooldown("a", now + crate::routes::proxy::QUOTA_COOLDOWN_SECS + 1));
+        assert_eq!(
+            st.quota_cooldown_until("a", now + crate::routes::proxy::QUOTA_COOLDOWN_SECS + 1),
+            None
+        );
         assert!(!st.in_quota_cooldown("b", now));
         let _ = std::fs::remove_file(path);
     }

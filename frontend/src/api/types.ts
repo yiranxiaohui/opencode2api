@@ -21,6 +21,7 @@ export interface KeySummary {
   tags: string[]
   notes: string
   is_enabled: boolean
+  cooldown_until: number | null
   model_count: number
   created_at: number
   updated_at: number

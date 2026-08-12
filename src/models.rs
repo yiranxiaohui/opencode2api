@@ -37,6 +37,8 @@ pub struct KeySummary {
     pub tags: Vec<String>,
     pub notes: String,
     pub is_enabled: bool,
+    /// Unix timestamp at which quota routing cooldown ends, if currently active.
+    pub cooldown_until: Option<i64>,
     pub model_count: usize,
     pub created_at: i64,
     pub updated_at: i64,
@@ -56,6 +58,7 @@ impl KeySummary {
             tags: r.tags.clone(),
             notes: r.notes.clone(),
             is_enabled: r.is_enabled,
+            cooldown_until: None,
             model_count: r.model_cache.len(),
             created_at: r.created_at,
             updated_at: r.updated_at,

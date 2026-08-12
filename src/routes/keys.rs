@@ -36,7 +36,7 @@ pub async fn list(
         .db
         .list_keys()?
         .into_iter()
-        .map(|r| KeySummary::from_row(&r))
+        .map(|r| summary(&st, &r))
         .collect();
 
     if let Some(q) = params.q.filter(|s| !s.trim().is_empty()) {
@@ -60,7 +60,7 @@ pub async fn get_key(
         .ok_or_else(|| ApiError::NotFound("key not found".into()))?;
     let api_key = st.decrypt_secret(&row.api_key_enc).await?;
     Ok(Json(KeyRecord {
-        summary: KeySummary::from_row(&row),
+        summary: summary(&st, &row),
         api_key: api_key.to_string(),
         model_cache: row.model_cache,
     }))
@@ -121,7 +121,7 @@ pub async fn create(
     Ok((
         StatusCode::CREATED,
         Json(KeyRecord {
-            summary: KeySummary::from_row(&row),
+            summary: summary(&st, &row),
             api_key: decrypted.to_string(),
             model_cache: row.model_cache,
         }),
@@ -179,7 +179,7 @@ pub async fn update(
     let row = st.db.get_key(&id)?.unwrap();
     let decrypted = st.decrypt_secret(&row.api_key_enc).await?;
     Ok(Json(KeyRecord {
-        summary: KeySummary::from_row(&row),
+        summary: summary(&st, &row),
         api_key: decrypted.to_string(),
         model_cache: row.model_cache,
     }))
@@ -225,11 +225,17 @@ pub async fn import_cookie(
     Ok((
         StatusCode::CREATED,
         Json(KeyRecord {
-            summary: KeySummary::from_row(&row),
+            summary: summary(&st, &row),
             api_key,
             model_cache: vec![],
         }),
     ))
+}
+
+fn summary(st: &AppState, row: &crate::db::KeyRow) -> KeySummary {
+    let mut value = KeySummary::from_row(row);
+    value.cooldown_until = st.quota_cooldown_until(&row.id, now_secs());
+    value
 }
 
 pub async fn usage(

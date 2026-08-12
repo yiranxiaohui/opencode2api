@@ -10,6 +10,7 @@ export function useKeys(enabled: boolean) {
     queryFn: keysApi.list,
     enabled,
     staleTime: 10_000,
+    refetchInterval: 10_000,
   })
   const qc = useQueryClient()
   const invalidate = () => qc.invalidateQueries({ queryKey: keysQueryKey })
