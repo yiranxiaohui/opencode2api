@@ -261,10 +261,12 @@ pub async fn usage(
     let client = st.client_for_key(&row).await?;
     let usage = crate::opencode_account::usage(&client, &cookie, workspace).await?;
     st.db.set_usage_cache(&id, &usage)?;
-    if usage.plan_name.to_lowercase().contains("go") {
-        st.db
-            .set_account_type(&id, crate::models::AccountType::Go, now_secs())?;
-    }
+    let account_type = if usage.plan_name.eq_ignore_ascii_case("OpenCode Go") {
+        crate::models::AccountType::Go
+    } else {
+        crate::models::AccountType::Normal
+    };
+    st.db.set_account_type(&id, account_type, now_secs())?;
     Ok(Json(usage))
 }
 

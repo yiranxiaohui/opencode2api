@@ -226,18 +226,16 @@ pub async fn usage(
         query(client, cookie, workspace, SUBSCRIPTION_QUERY),
         query(client, cookie, workspace, BILLING_QUERY)
     )?;
-    let plan_name = if Regex::new(r#"liteSubscriptionID\s*:\s*"[^\"]+""#)
-        .unwrap()
-        .is_match(&subscription)
-    {
-        "OpenCode Go"
-    } else if let Some(plan) = string(&billing, "subscriptionPlan") {
-        return Ok(build(plan, &subscription, &billing));
-    } else {
-        "OpenCode Zen"
-    }
-    .to_string();
+    let plan_name = plan_name(&subscription, &billing);
     Ok(build(plan_name, &subscription, &billing))
+}
+
+fn plan_name(subscription: &str, billing: &str) -> String {
+    if string(subscription, "liteSubscriptionID").is_some() {
+        "OpenCode Go".to_string()
+    } else {
+        string(billing, "subscriptionPlan").unwrap_or_else(|| "OpenCode Zen".to_string())
+    }
 }
 
 pub async fn invite_link(
@@ -312,6 +310,30 @@ mod tests {
         )
         .unwrap();
         assert_eq!(w.remaining_percent, 62.5);
+    }
+
+    #[test]
+    fn detects_go_from_quoted_lite_subscription_id() {
+        assert_eq!(
+            plan_name(r#"{"liteSubscriptionID":"sub_123"}"#, "{}"),
+            "OpenCode Go"
+        );
+    }
+
+    #[test]
+    fn detects_go_from_unquoted_lite_subscription_id() {
+        assert_eq!(
+            plan_name(r#"{liteSubscriptionID:"sub_123"}"#, "{}"),
+            "OpenCode Go"
+        );
+    }
+
+    #[test]
+    fn uses_billing_plan_without_go_subscription() {
+        assert_eq!(
+            plan_name("{}", r#"{"subscriptionPlan":"OpenCode Business"}"#),
+            "OpenCode Business"
+        );
     }
     #[test]
     fn extracts_email_from_serialized_session() {
