@@ -38,6 +38,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/client-keys/{id}", delete(client_keys::delete))
         .route("/logs", get(logs::list).delete(logs::clear))
         .route("/logs/stats", get(logs::stats))
+        .route("/models", get(models::catalog))
+        .route("/models/set-enabled", post(models::set_enabled))
         .route("/chat/{*path}", any(proxy::chat_proxy))
         .route("/keys", get(keys::list).post(keys::create))
         .route("/keys/import-cookie", post(keys::import_cookie))

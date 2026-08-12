@@ -10,6 +10,7 @@ API Key 使用 **登录密码派生密钥 AES-256-GCM 加密** 后存于 SQLite�
 
 - **账号管理**：增删改查、搜索、标签筛选、启用/禁用
 - **连通性测试**：一键请求 OpenCode 官方 `/models`，显示延迟与模型列表并缓存
+- **模型管理**：汇总账号支持的模型，可全局启用或禁用并控制网关访问
 - **统一代理**：`POST /v1/chat/completions` 等，SSE 流式原样透传；使用会话粘性哈希在支持请求模型的账号池中负载均衡，避免连续对话切换账号导致缓存未命中
 - **访问密钥**：为调用代理的客户端自动生成独立 API Key，可随时撤销
 - **代理池**：管理一组 HTTP / HTTPS / SOCKS5 出口转发代理，每个账号可挂一个；网关转发、连通性测试、`/v1/models` 聚合均走该代理
@@ -96,6 +97,8 @@ print(client.chat.completions.create(
 | `POST` | `/api/keys/{id}/set-enabled` | 启用或禁用账号 |
 | `GET` | `/api/keys/{id}/usage` | 查询通过 Cookie 导入账号的套餐额度 |
 | `GET` | `/api/keys/export-invite-links` | 批量获取并导出 Cookie 账号的邀请链接 |
+| `GET` | `/api/models` | 获取模型管理列表及启用状态 |
+| `POST` | `/api/models/set-enabled` | 全局启用或禁用指定模型 |
 | `GET`/`POST`/`DELETE` | `/api/client-keys[/{id}]` | 管理客户端访问密钥 |
 | `GET`/`POST` | `/api/proxies` | 代理池列表 / 新增 |
 | `PUT`/`DELETE` | `/api/proxies/{id}` | 编辑 / 删除代理（删除后相关账号恢复直连） |

@@ -83,6 +83,20 @@ pub struct ModelInfo {
     pub owned_by: String,
 }
 
+#[derive(Debug, Serialize)]
+pub struct ManagedModel {
+    pub id: String,
+    pub owned_by: String,
+    pub account_count: usize,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ModelEnabledInput {
+    pub id: String,
+    pub enabled: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExportItem {
     pub name: String,

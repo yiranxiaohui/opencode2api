@@ -8,19 +8,20 @@ import CookieImportModal from './components/CookieImportModal'
 import KeyFormModal from './components/KeyFormModal'
 import KeyList from './components/KeyList'
 import Logs from './components/Logs'
+import ModelList from './components/ModelList'
 import ClientKeys from './components/ClientKeys'
 import ProxyFormModal from './components/ProxyFormModal'
 import ProxyList from './components/ProxyList'
 import Settings from './components/Settings'
 import ToastHost from './components/ToastHost'
-import { ActivityIcon, GatewayIcon, GearIcon, GlobeIcon, KeyIcon, PlusIcon, VaultIcon } from './components/icons'
+import { ActivityIcon, GatewayIcon, GearIcon, GlobeIcon, KeyIcon, ModelIcon, PlusIcon, VaultIcon } from './components/icons'
 import { useKeys } from './hooks/useKeys'
 import { useProxies } from './hooks/useProxies'
 import { useSession } from './hooks/useSession'
 import { clientKeysApi } from './api/keys'
 import { toast } from './lib/toast'
 
-type Tab = 'keys' | 'logs' | 'proxies' | 'client-keys' | 'settings'
+type Tab = 'keys' | 'models' | 'logs' | 'proxies' | 'client-keys' | 'settings'
 
 export default function App() {
   const session = useSession()
@@ -111,6 +112,7 @@ export default function App() {
 
   const renderTab = () => {
     if (tab === 'logs') return <Logs keys={keys} clientKeys={clientKeys} />
+    if (tab === 'models') return <ModelList />
     if (tab === 'client-keys') return <ClientKeys onKeysChange={setClientKeys} />
     if (tab === 'settings') return <Settings />
     if (tab === 'proxies')
@@ -205,6 +207,9 @@ export default function App() {
         <button className={`nav-item ${tab === 'logs' ? 'active' : ''}`} onClick={() => setTab('logs')}>
           <ActivityIcon /> 请求日志
         </button>
+        <button className={`nav-item ${tab === 'models' ? 'active' : ''}`} onClick={() => setTab('models')}>
+          <ModelIcon /> 模型管理
+        </button>
         <button className={`nav-item ${tab === 'proxies' ? 'active' : ''}`} onClick={() => setTab('proxies')}>
           <GlobeIcon /> 代理池
         </button>
@@ -221,6 +226,7 @@ export default function App() {
           <div className="topbar-title">
             {tab === 'keys' && '账号管理'}
             {tab === 'logs' && '请求日志'}
+            {tab === 'models' && '模型管理'}
             {tab === 'proxies' && '代理池'}
             {tab === 'client-keys' && '密钥管理'}
             {tab === 'settings' && '设置'}

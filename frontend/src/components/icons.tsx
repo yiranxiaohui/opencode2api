@@ -201,3 +201,10 @@ export const ActivityIcon = ({ size, style, className }: IconProps) => (
     <path d="M3 12h4l2.5-7 4.5 14 2.5-7h4.5" />
   </svg>
 )
+
+export const ModelIcon = ({ size, style, className }: IconProps) => (
+  <svg {...base({ size, style, className })}>
+    <path d="M12 3 4 7l8 4 8-4-8-4Z" />
+    <path d="m4 12 8 4 8-4M4 17l8 4 8-4" />
+  </svg>
+)
