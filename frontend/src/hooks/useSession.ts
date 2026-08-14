@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { apiStatus } from '../api/client'
 
-export type Phase = 'boot' | 'setup' | 'locked' | 'unlocked' | 'error'
+export type Phase = 'boot' | 'setup' | 'logged_out' | 'logged_in' | 'error'
 
 export function useSession() {
   const [phase, setPhase] = useState<Phase>('boot')
@@ -11,7 +11,7 @@ export function useSession() {
     setError('')
     apiStatus()
       .then((s) => {
-        setPhase(s.installed ? (s.unlocked ? 'unlocked' : 'locked') : 'setup')
+        setPhase(s.installed ? (s.logged_in ? 'logged_in' : 'logged_out') : 'setup')
       })
       .catch(() => setPhase('error'))
   }

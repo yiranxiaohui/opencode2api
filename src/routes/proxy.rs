@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::error::ApiError;
-use crate::middleware::Unlocked;
+use crate::middleware::Authenticated;
 use crate::routes::logs::{self, LogInput};
 use crate::state::AppState;
 
@@ -17,7 +17,7 @@ use crate::state::AppState;
 /// SSE (stream: true) is forwarded incrementally via `Body::from_stream`.
 pub async fn proxy(
     State(st): State<AppState>,
-    _: Unlocked,
+    _: Authenticated,
     method: Method,
     Path(path): Path<String>,
     headers: HeaderMap,
@@ -31,7 +31,7 @@ pub async fn proxy(
 
 pub async fn chat_proxy(
     State(st): State<AppState>,
-    _: Unlocked,
+    _: Authenticated,
     method: Method,
     Path(path): Path<String>,
     headers: HeaderMap,

@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
-import { setLockedHandler } from './api/client'
+import { useCallback, useEffect, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { setUnauthorizedHandler } from './api/client'
 import type { ClientApiKey, KeyInput, KeySummary, ProxyRecord } from './api/types'
 import AuthScreen from './components/AuthScreen'
 import ImportExportBar from './components/ImportExportBar'
@@ -14,17 +15,18 @@ import ProxyFormModal from './components/ProxyFormModal'
 import ProxyList from './components/ProxyList'
 import Settings from './components/Settings'
 import ToastHost from './components/ToastHost'
-import { ActivityIcon, GatewayIcon, GearIcon, GlobeIcon, KeyIcon, ModelIcon, PlusIcon, VaultIcon } from './components/icons'
+import { ActivityIcon, GatewayIcon, GearIcon, GlobeIcon, KeyIcon, LogOutIcon, ModelIcon, PlusIcon, VaultIcon } from './components/icons'
 import { useKeys } from './hooks/useKeys'
 import { useProxies } from './hooks/useProxies'
 import { useSession } from './hooks/useSession'
-import { clientKeysApi } from './api/keys'
+import { auth, clientKeysApi } from './api/keys'
 import { toast } from './lib/toast'
 
 type Tab = 'keys' | 'models' | 'logs' | 'proxies' | 'client-keys' | 'settings'
 
 export default function App() {
-  const session = useSession()
+  const { phase, setPhase } = useSession()
+  const queryClient = useQueryClient()
   const [tab, setTab] = useState<Tab>('keys')
   const [formOpen, setFormOpen] = useState(false)
   const [cookieImportOpen, setCookieImportOpen] = useState(false)
@@ -35,36 +37,61 @@ export default function App() {
   const [proxyFormOpen, setProxyFormOpen] = useState(false)
   const [editingProxy, setEditingProxy] = useState<ProxyRecord | null>(null)
   const [pendingProxyDelete, setPendingProxyDelete] = useState<ProxyRecord | null>(null)
+  const [clientKeys, setClientKeys] = useState<ClientApiKey[]>([])
+  const [logoutBusy, setLogoutBusy] = useState(false)
+
+  const showLogin = useCallback(() => {
+    queryClient.clear()
+    setTab('keys')
+    setFormOpen(false)
+    setCookieImportOpen(false)
+    setEditing(null)
+    setDetail(null)
+    setPendingDelete(null)
+    setBusy(false)
+    setProxyFormOpen(false)
+    setEditingProxy(null)
+    setPendingProxyDelete(null)
+    setClientKeys([])
+    setLogoutBusy(false)
+    setPhase('logged_out')
+  }, [queryClient, setPhase])
 
   const { query, createKey, updateKey, deleteKey, setEnabled, testKey, importItems, importCookie } = useKeys(
-    session.phase === 'unlocked',
+    phase === 'logged_in',
   )
   const { query: proxiesQuery, createProxy, updateProxy, deleteProxy } = useProxies(
-    session.phase === 'unlocked',
+    phase === 'logged_in',
   )
 
   useEffect(() => {
-    setLockedHandler(() => {
-      session.boot()
-      setTab('keys')
-      setDetail(null)
-      setFormOpen(false)
-    })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    setUnauthorizedHandler(showLogin)
+    return () => setUnauthorizedHandler(null)
+  }, [showLogin])
+
+  const handleLogout = async () => {
+    setLogoutBusy(true)
+    try {
+      await auth.logout()
+      showLogin()
+      toast('已退出登录', 'ok')
+    } catch (cause) {
+      setLogoutBusy(false)
+      toast(cause instanceof Error ? cause.message : '退出登录失败', 'err')
+    }
+  }
 
   const keys = query.data ?? []
   const proxies = proxiesQuery.data ?? []
-  const [clientKeys, setClientKeys] = useState<ClientApiKey[]>([])
   useEffect(() => {
-    if (session.phase !== 'unlocked') return
+    if (phase !== 'logged_in') return
     let live = true
     clientKeysApi
       .list()
       .then((items) => { if (live) setClientKeys(items) })
       .catch(() => { /* filters still work without the list */ })
     return () => { live = false }
-  }, [session.phase])
+  }, [phase])
 
   const handleSave = (input: KeyInput) => {
     setBusy(true)
@@ -181,10 +208,10 @@ export default function App() {
     )
   }
 
-  if (session.phase === 'boot') return <BootScreen />
-  if (session.phase === 'setup') return <AuthScreen mode="setup" onDone={() => session.setPhase('unlocked')} />
-  if (session.phase === 'locked') return <AuthScreen mode="unlock" onDone={() => session.setPhase('unlocked')} />
-  if (session.phase === 'error')
+  if (phase === 'boot') return <BootScreen />
+  if (phase === 'setup') return <AuthScreen mode="setup" onDone={() => setPhase('logged_in')} />
+  if (phase === 'logged_out') return <AuthScreen mode="login" onDone={() => setPhase('logged_in')} />
+  if (phase === 'error')
     return <BootScreen error="无法连接后端，请确认 cargo run 已在 127.0.0.1:8787 启动" />
 
   return (
@@ -232,6 +259,9 @@ export default function App() {
             {tab === 'settings' && '设置'}
           </div>
           <div className="topbar-spacer" />
+          <button className="btn btn-ghost" type="button" disabled={logoutBusy} onClick={handleLogout}>
+            <LogOutIcon size={14} /> {logoutBusy ? '正在退出…' : '退出登录'}
+          </button>
         </div>
         <div className="content">{renderTab()}</div>
       </main>
@@ -340,7 +370,7 @@ function BootScreen({ error }: { error?: string }) {
         ) : (
           <>
             <h1>opencode2api</h1>
-            <p className="tagline">正在登录…</p>
+            <p className="tagline">正在加载…</p>
           </>
         )}
       </div>

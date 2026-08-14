@@ -7,7 +7,6 @@ use serde_json::json;
 pub enum ApiError {
     BadRequest(String),
     Unauthorized(String),
-    Locked,
     Conflict(String),
     NotFound(String),
     Internal(String),
@@ -19,7 +18,6 @@ impl ApiError {
         match self {
             ApiError::BadRequest(_) => StatusCode::BAD_REQUEST,
             ApiError::Unauthorized(_) => StatusCode::UNAUTHORIZED,
-            ApiError::Locked => StatusCode::LOCKED,
             ApiError::Conflict(_) => StatusCode::CONFLICT,
             ApiError::NotFound(_) => StatusCode::NOT_FOUND,
             ApiError::Upstream(_) => StatusCode::BAD_GATEWAY,
@@ -29,7 +27,6 @@ impl ApiError {
 
     pub fn message(&self) -> String {
         match self {
-            ApiError::Locked => "locked".into(),
             ApiError::Unauthorized(m)
             | ApiError::BadRequest(m)
             | ApiError::Conflict(m)

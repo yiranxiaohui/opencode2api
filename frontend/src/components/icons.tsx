@@ -77,10 +77,10 @@ export const GearIcon = ({ size, style, className }: IconProps) => (
   </svg>
 )
 
-export const LockIcon = ({ size, style, className }: IconProps) => (
+export const LogOutIcon = ({ size, style, className }: IconProps) => (
   <svg {...base({ size, style, className })}>
-    <rect x="5" y="10" width="14" height="10" rx="2" />
-    <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+    <path d="M10 5H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h5" />
+    <path d="m15 8 4 4-4 4M19 12H9" />
   </svg>
 )
 

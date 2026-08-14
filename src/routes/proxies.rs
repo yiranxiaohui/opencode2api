@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::db::ProxyData;
 use crate::error::ApiError;
-use crate::middleware::Unlocked;
+use crate::middleware::Authenticated;
 use crate::models::{OkResponse, ProxyInput, ProxyRecord, now_secs};
 use crate::state::AppState;
 
@@ -21,7 +21,7 @@ fn row_to_record(r: &crate::db::ProxyRow, url: String) -> ProxyRecord {
 
 pub async fn list(
     State(st): State<AppState>,
-    _: Unlocked,
+    _: Authenticated,
 ) -> Result<Json<Vec<ProxyRecord>>, ApiError> {
     let rows = st.db.list_proxies()?;
     let mut out = Vec::with_capacity(rows.len());
@@ -34,7 +34,7 @@ pub async fn list(
 
 pub async fn create(
     State(st): State<AppState>,
-    _: Unlocked,
+    _: Authenticated,
     Json(input): Json<ProxyInput>,
 ) -> Result<(StatusCode, Json<ProxyRecord>), ApiError> {
     let name = input.name.trim().to_string();
@@ -64,7 +64,7 @@ pub async fn create(
 
 pub async fn update(
     State(st): State<AppState>,
-    _: Unlocked,
+    _: Authenticated,
     Path(id): Path<String>,
     Json(input): Json<ProxyInput>,
 ) -> Result<Json<ProxyRecord>, ApiError> {
@@ -100,7 +100,7 @@ pub async fn update(
 
 pub async fn delete(
     State(st): State<AppState>,
-    _: Unlocked,
+    _: Authenticated,
     Path(id): Path<String>,
 ) -> Result<Json<OkResponse>, ApiError> {
     if !st.db.delete_proxy(&id)? {

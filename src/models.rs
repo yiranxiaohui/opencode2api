@@ -235,7 +235,7 @@ pub struct OkResponse {
 #[derive(Debug, Serialize)]
 pub struct StatusResponse {
     pub installed: bool,
-    pub unlocked: bool,
+    pub logged_in: bool,
     pub key_count: i64,
 }
 

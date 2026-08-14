@@ -471,6 +471,45 @@ mod m20260812_000010_add_account_type {
     }
 }
 
+mod m20260814_000011_rename_persisted_login_key {
+    use sea_orm_migration::prelude::*;
+
+    pub struct Migration;
+
+    impl MigrationName for Migration {
+        fn name(&self) -> &str {
+            "m20260814_000011_rename_persisted_login_key"
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl MigrationTrait for Migration {
+        async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            manager
+                .get_connection()
+                .execute_unprepared(
+                    "INSERT OR IGNORE INTO meta(key, value)
+                     SELECT 'login_key', value FROM meta WHERE key = 'auto_unlock_key';
+                     DELETE FROM meta WHERE key = 'auto_unlock_key';",
+                )
+                .await?;
+            Ok(())
+        }
+
+        async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            manager
+                .get_connection()
+                .execute_unprepared(
+                    "INSERT OR IGNORE INTO meta(key, value)
+                     SELECT 'auto_unlock_key', value FROM meta WHERE key = 'login_key';
+                     DELETE FROM meta WHERE key = 'login_key';",
+                )
+                .await?;
+            Ok(())
+        }
+    }
+}
+
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -487,6 +526,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260811_000008_add_account_usage_cache::Migration),
             Box::new(m20260812_000009_add_disabled_models::Migration),
             Box::new(m20260812_000010_add_account_type::Migration),
+            Box::new(m20260814_000011_rename_persisted_login_key::Migration),
         ]
     }
 }
@@ -565,7 +605,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(applied, 10);
+        assert_eq!(applied, 11);
         assert_eq!(has_proxy_id, 1);
         assert_eq!(has_client_key_enc, 1);
         assert_eq!(has_is_enabled, 1);
@@ -598,7 +638,12 @@ mod tests {
         let connection = Connection::open(&path).unwrap();
         connection
             .execute_batch(
-                "CREATE TABLE api_keys (
+                "CREATE TABLE meta (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                );
+                INSERT INTO meta(key, value) VALUES ('auto_unlock_key', 'persisted-key');
+                CREATE TABLE api_keys (
                     id TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
                     base_url TEXT NOT NULL,
@@ -623,6 +668,20 @@ mod tests {
         let name: String = connection
             .query_row(
                 "SELECT name FROM api_keys WHERE id = 'existing'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let persisted_login_key: String = connection
+            .query_row(
+                "SELECT value FROM meta WHERE key = 'login_key'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let legacy_login_key_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM meta WHERE key = 'auto_unlock_key'",
                 [],
                 |row| row.get(0),
             )
@@ -656,6 +715,8 @@ mod tests {
             )
             .unwrap();
         assert_eq!(name, "Existing");
+        assert_eq!(persisted_login_key, "persisted-key");
+        assert_eq!(legacy_login_key_count, 0);
         assert_eq!(has_proxy_id, 1);
         assert_eq!(has_client_key_enc, 1);
         assert_eq!(is_enabled, 1);

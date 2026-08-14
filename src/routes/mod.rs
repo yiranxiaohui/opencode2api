@@ -29,7 +29,8 @@ pub fn build_router(state: AppState) -> Router {
     let api = Router::new()
         .route("/status", get(auth::status))
         .route("/auth/setup", post(auth::setup))
-        .route("/auth/unlock", post(auth::unlock))
+        .route("/auth/login", post(auth::login))
+        .route("/auth/logout", post(auth::logout))
         .route("/auth/change-password", post(auth::change_password))
         .route(
             "/client-keys",

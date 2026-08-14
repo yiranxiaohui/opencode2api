@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { auth } from '../api/keys'
 import { toast } from '../lib/toast'
-import { KeyIcon, LockIcon, ShieldIcon } from './icons'
+import { KeyIcon, ShieldIcon } from './icons'
 
 interface Props {
-  mode: 'setup' | 'unlock'
+  mode: 'setup' | 'login'
   onDone: () => void
 }
 
@@ -31,7 +31,7 @@ export default function AuthScreen({ mode, onDone }: Props) {
         await auth.setup(password)
         toast('已创建账号并登录', 'ok')
       } else {
-        await auth.unlock(password)
+        await auth.login(password)
       }
       onDone()
     } catch (e) {
@@ -93,7 +93,7 @@ export default function AuthScreen({ mode, onDone }: Props) {
 
         {!isSetup && (
           <p className="mono-note">
-            <LockIcon size={11} style={{ verticalAlign: '-1px' }} /> 本次登录后将启用自动恢复，服务重启无需再次输入密码。
+            <ShieldIcon size={11} style={{ verticalAlign: '-1px' }} /> 登录状态会在服务重启后自动恢复；退出登录后需重新输入密码。
           </p>
         )}
       </form>

@@ -180,6 +180,12 @@ impl Db {
         Ok(())
     }
 
+    pub fn delete_meta(&self, key: &str) -> Result<(), ApiError> {
+        let conn = self.0.lock().unwrap();
+        conn.execute("DELETE FROM meta WHERE key = ?1", params![key])?;
+        Ok(())
+    }
+
     // ---- client API keys ---------------------------------------------------
 
     pub fn list_client_keys(&self) -> Result<Vec<ClientKeyRow>, ApiError> {

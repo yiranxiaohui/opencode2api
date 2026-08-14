@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::db::{ClientKeyRow, KeyRow, LogFilter, RequestLogRow};
 use crate::error::ApiError;
-use crate::middleware::Unlocked;
+use crate::middleware::Authenticated;
 use crate::models::{LogListResponse, LogStatsResponse, OkResponse, RequestLogRecord, now_secs};
 use crate::state::AppState;
 
@@ -41,7 +41,7 @@ fn filter_from(q: LogQuery) -> LogFilter {
 
 pub async fn list(
     State(st): State<AppState>,
-    _: Unlocked,
+    _: Authenticated,
     Query(q): Query<LogQuery>,
 ) -> Result<Json<LogListResponse>, ApiError> {
     let filter = filter_from(q);
@@ -54,7 +54,7 @@ pub async fn list(
 
 pub async fn stats(
     State(st): State<AppState>,
-    _: Unlocked,
+    _: Authenticated,
     Query(q): Query<LogQuery>,
 ) -> Result<Json<LogStatsResponse>, ApiError> {
     let filter = filter_from(q);
@@ -66,7 +66,10 @@ pub async fn stats(
     }))
 }
 
-pub async fn clear(State(st): State<AppState>, _: Unlocked) -> Result<Json<OkResponse>, ApiError> {
+pub async fn clear(
+    State(st): State<AppState>,
+    _: Authenticated,
+) -> Result<Json<OkResponse>, ApiError> {
     st.db.clear_request_logs()?;
     Ok(Json(OkResponse { ok: true }))
 }

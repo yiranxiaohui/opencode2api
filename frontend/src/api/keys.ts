@@ -21,7 +21,8 @@ import type {
 
 export const auth = {
   setup: (password: string) => post<{ ok: boolean }>('/api/auth/setup', { password }),
-  unlock: (password: string) => post<{ ok: boolean }>('/api/auth/unlock', { password }),
+  login: (password: string) => post<{ ok: boolean }>('/api/auth/login', { password }),
+  logout: () => post<{ ok: boolean }>('/api/auth/logout'),
   changePassword: (old_password: string, new_password: string) =>
     post<{ ok: boolean }>('/api/auth/change-password', { old_password, new_password }),
 }

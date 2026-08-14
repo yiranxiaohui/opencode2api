@@ -108,7 +108,7 @@ export default function ClientKeys({ onKeysChange }: Props) {
           <strong>访问密钥</strong>
           <span className="count">{keys.length} 条</span>
         </div>
-        <span className="small">完整密钥仅在已解锁的管理页面返回</span>
+        <span className="small">完整密钥仅在已登录的管理页面返回</span>
       </div>
 
       <div className="panel client-key-table">

@@ -1,6 +1,6 @@
 export interface Status {
   installed: boolean
-  unlocked: boolean
+  logged_in: boolean
   key_count: number
 }
 

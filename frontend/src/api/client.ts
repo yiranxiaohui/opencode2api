@@ -8,14 +8,14 @@ export class ApiError extends Error {
   }
 }
 
-/** Global handler for HTTP 423 (vault locked). Set by App. */
-let onLocked: (() => void) | null = null
-export function setLockedHandler(fn: (() => void) | null) {
-  onLocked = fn
+/** Global handler for management API requests made after logout. Set by App. */
+let onUnauthorized: (() => void) | null = null
+export function setUnauthorizedHandler(fn: (() => void) | null) {
+  onUnauthorized = fn
 }
 
-export function handleLocked() {
-  onLocked?.()
+export function handleUnauthorized() {
+  onUnauthorized?.()
 }
 
 interface ReqOpts extends Omit<RequestInit, 'body'> {
@@ -33,9 +33,8 @@ export async function request<T>(path: string, opts: ReqOpts = {}): Promise<T> {
     body: opts.json !== undefined ? JSON.stringify(opts.json) : opts.body,
   })
 
-  if (res.status === 423) {
-    handleLocked()
-    throw new ApiError(423, 'locked')
+  if (res.status === 401 && !path.startsWith('/api/auth/')) {
+    handleUnauthorized()
   }
 
   if (!res.ok) {

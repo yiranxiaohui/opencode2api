@@ -4,11 +4,11 @@ use axum::http::request::Parts;
 use crate::error::ApiError;
 use crate::state::AppState;
 
-/// Extractor that only succeeds when the app is unlocked (master key in memory).
-/// Locked requests are rejected with HTTP 423.
-pub struct Unlocked;
+/// Extractor that only succeeds while the management user is logged in.
+/// Requests made after logout are rejected with HTTP 401.
+pub struct Authenticated;
 
-impl FromRequestParts<AppState> for Unlocked {
+impl FromRequestParts<AppState> for Authenticated {
     type Rejection = ApiError;
 
     async fn from_request_parts(
@@ -16,9 +16,9 @@ impl FromRequestParts<AppState> for Unlocked {
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
         if state.master_key.read().await.is_some() {
-            Ok(Unlocked)
+            Ok(Authenticated)
         } else {
-            Err(ApiError::Locked)
+            Err(ApiError::Unauthorized("not logged in".into()))
         }
     }
 }

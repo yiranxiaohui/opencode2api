@@ -18,7 +18,7 @@ API Key 使用 **登录密码派生密钥 AES-256-GCM 加密** 后存于 SQLite�
 - **请求日志与用量统计**：按客户端密钥、路由账号、模型和状态筛选请求，记录延迟、首 Token 延迟以及输入、输出和缓存 Token 用量
 - **导入 / 导出**：JSON 一键迁移，导出含明文 Key（注意保管）
 - **一键复制**：URL 与 Key 随时复制，Key 仅在点击时解密
-- **本机运行**：仅绑定 `127.0.0.1`；派生密钥持久化到本地数据目录，服务重启后自动恢复
+- **本机运行**：仅绑定 `127.0.0.1`；登录状态可在服务重启后自动恢复，也可从管理页面主动退出
 
 ## 快速开始
 
@@ -88,8 +88,8 @@ print(client.chat.completions.create(
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| `GET` | `/api/status` | `{installed, unlocked, key_count}` |
-| `POST` | `/api/auth/setup` / `unlock` / `change-password` | 初始化、旧数据库迁移与修改登录密码 |
+| `GET` | `/api/status` | `{installed, logged_in, key_count}` |
+| `POST` | `/api/auth/setup` / `login` / `logout` / `change-password` | 初始化、登录、退出登录与修改登录密码 |
 | `GET` | `/api/keys?q=&tag=` | 账号列表（不含 Key） |
 | `GET` | `/api/keys/{id}` | 账号详情（含解密 Key） |
 | `POST`/`PUT`/`DELETE` | `/api/keys[/{id}]` | 增删改 |
@@ -124,8 +124,8 @@ OpenCode Zen 会根据模型使用不同协议。客户端仍统一连接本服�
 - 仅绑定回环地址；**没有**开放 CORS —— 浏览器同源才能访问，防恶意网页调用代理。
 - 上游请求禁跟随重定向，避免 Bearer Token 泄露给第三方主机。
 - 登录密码经 argon2id（`m=19456,t=2,p=1`）派生 AES-256 密钥，Key 与代理 URL（可能含凭据）
-  逐个用随机 nonce 加密；派生密钥会持久化，使服务重启后能够自动恢复。
-- 持久化的自动解锁密钥与密文保存在同一数据目录，因此该设计用于避免凭据明文落盘，不能抵御整个数据目录被窃取的情况。请使用操作系统权限和磁盘加密保护数据目录。
+  逐个用随机 nonce 加密；派生密钥在登录期间持久化，使服务重启后能够自动恢复，并在退出登录时删除。
+- 持久化的登录密钥与密文保存在同一数据目录，因此该设计用于避免凭据明文落盘，不能抵御整个数据目录被窃取的情况。请使用操作系统权限和磁盘加密保护数据目录。
 - 明文 Key 只短暂存在于进程内存，绝不落盘、不写日志。
 
 ## 目录结构
@@ -139,7 +139,7 @@ src/
 ├── migration/       # SeaORM Migration 数据库版本迁移
 ├── state.rs         # AppState（DB、内存密钥、reqwest 客户端）
 ├── error.rs         # 统一错误
-├── middleware.rs    # Unlocked 提取器（423）
+├── middleware.rs    # 登录状态校验（401）
 └── routes/          # auth / keys / import_export / proxy
 frontend/src/
 ├── App.tsx          # 设置/登录/主界面切换

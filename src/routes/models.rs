@@ -8,13 +8,13 @@ use futures_util::stream::{self, StreamExt};
 use serde_json::{Value, json};
 
 use crate::error::ApiError;
-use crate::middleware::Unlocked;
+use crate::middleware::Authenticated;
 use crate::models::{ManagedModel, ModelEnabledInput, OkResponse};
 use crate::state::AppState;
 
 /// Gateway-wide model catalog. Every configured route is queried concurrently
 /// and duplicate model IDs are collapsed into one OpenAI-compatible entry.
-pub async fn models(State(st): State<AppState>, _: Unlocked, headers: HeaderMap) -> Response {
+pub async fn models(State(st): State<AppState>, _: Authenticated, headers: HeaderMap) -> Response {
     match models_inner(st, &headers).await {
         Ok(value) => Json(value).into_response(),
         Err(error) => super::proxy::openai_error(error),
@@ -122,7 +122,7 @@ async fn models_inner(st: AppState, headers: &HeaderMap) -> Result<Value, ApiErr
 
 pub async fn catalog(
     State(st): State<AppState>,
-    _: Unlocked,
+    _: Authenticated,
 ) -> Result<Json<Vec<ManagedModel>>, ApiError> {
     let disabled = st.db.disabled_models()?;
     let mut models = BTreeMap::<String, (String, usize)>::new();
@@ -152,7 +152,7 @@ pub async fn catalog(
 
 pub async fn set_enabled(
     State(st): State<AppState>,
-    _: Unlocked,
+    _: Authenticated,
     Json(input): Json<ModelEnabledInput>,
 ) -> Result<Json<OkResponse>, ApiError> {
     let id = input.id.trim();
