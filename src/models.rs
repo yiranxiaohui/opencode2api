@@ -277,6 +277,37 @@ pub struct ClientKeyCreated {
     pub api_key: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminTokenInput {
+    pub name: String,
+    pub password: String,
+    pub scopes: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RevokeAdminTokenInput {
+    pub password: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AdminTokenSummary {
+    pub id: String,
+    pub name: String,
+    pub prefix: String,
+    pub scopes: Vec<String>,
+    pub created_at: i64,
+    pub last_used_at: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AdminTokenCreated {
+    #[serde(flatten)]
+    pub summary: AdminTokenSummary,
+    pub token: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct RequestLogRecord {
     pub id: String,

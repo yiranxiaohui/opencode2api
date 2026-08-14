@@ -4,13 +4,13 @@ use uuid::Uuid;
 
 use crate::crypto;
 use crate::error::ApiError;
-use crate::middleware::Authenticated;
+use crate::middleware::ManagementAuth;
 use crate::models::{ClientKeyCreated, ClientKeyInput, ClientKeySummary, OkResponse, now_secs};
 use crate::state::AppState;
 
 pub async fn list(
     State(st): State<AppState>,
-    _: Authenticated,
+    _: ManagementAuth,
 ) -> Result<Json<Vec<ClientKeySummary>>, ApiError> {
     let mut keys = Vec::new();
     for row in st.db.list_client_keys()? {
@@ -32,7 +32,7 @@ pub async fn list(
 
 pub async fn create(
     State(st): State<AppState>,
-    _: Authenticated,
+    _: ManagementAuth,
     Json(body): Json<ClientKeyInput>,
 ) -> Result<Json<ClientKeyCreated>, ApiError> {
     let name = body.name.trim();
@@ -75,7 +75,7 @@ pub async fn create(
 
 pub async fn delete(
     State(st): State<AppState>,
-    _: Authenticated,
+    _: ManagementAuth,
     Path(id): Path<String>,
 ) -> Result<Json<OkResponse>, ApiError> {
     if !st.db.delete_client_key(&id)? {

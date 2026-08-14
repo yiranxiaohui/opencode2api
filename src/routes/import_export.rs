@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::db::{KeyData, ProxyData};
 use crate::error::ApiError;
-use crate::middleware::Authenticated;
+use crate::middleware::ManagementAuth;
 use crate::models::{
     ExportItem, ExportPayload, ImportResult, OPENCODE_BASE_URL, ProxyExport, now_secs,
 };
@@ -13,7 +13,7 @@ use crate::state::AppState;
 
 pub async fn export(
     State(st): State<AppState>,
-    _: Authenticated,
+    _: ManagementAuth,
 ) -> Result<Json<ExportPayload>, ApiError> {
     let mut proxies = Vec::new();
     for row in st.db.list_proxies()? {
@@ -43,7 +43,7 @@ pub async fn export(
 
 pub async fn import(
     State(st): State<AppState>,
-    _: Authenticated,
+    _: ManagementAuth,
     body: Json<Value>,
 ) -> Result<Json<ImportResult>, ApiError> {
     // Accept both the new `{proxies, items}` shape and the legacy bare array of

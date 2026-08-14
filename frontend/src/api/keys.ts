@@ -1,5 +1,8 @@
-import { del, get, post, put } from './client'
+import { del, get, post, put, request } from './client'
 import type {
+  AdminToken,
+  AdminTokenCreated,
+  AdminTokenScope,
   ClientApiKey,
   ClientApiKeyCreated,
   CookieImportInput,
@@ -59,6 +62,17 @@ export const clientKeysApi = {
   list: () => get<ClientApiKey[]>('/api/client-keys'),
   create: (name: string) => post<ClientApiKeyCreated>('/api/client-keys', { name }),
   remove: (id: string) => del<{ ok: boolean }>(`/api/client-keys/${id}`),
+}
+
+export const adminTokensApi = {
+  list: () => get<AdminToken[]>('/api/admin-tokens'),
+  create: (name: string, password: string, scopes: AdminTokenScope[]) =>
+    post<AdminTokenCreated>('/api/admin-tokens', { name, password, scopes }),
+  revoke: (id: string, password: string) =>
+    request<{ ok: boolean }>(`/api/admin-tokens/${id}`, {
+      method: 'DELETE',
+      json: { password },
+    }),
 }
 
 function logsQuery(params: LogQuery): string {

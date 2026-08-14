@@ -510,6 +510,67 @@ mod m20260814_000011_rename_persisted_login_key {
     }
 }
 
+mod m20260814_000012_add_management_auth {
+    use sea_orm_migration::prelude::*;
+
+    pub struct Migration;
+
+    impl MigrationName for Migration {
+        fn name(&self) -> &str {
+            "m20260814_000012_add_management_auth"
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl MigrationTrait for Migration {
+        async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            manager
+                .get_connection()
+                .execute_unprepared(
+                    "INSERT OR IGNORE INTO meta(key, value)
+                     SELECT 'encryption_key', value FROM meta WHERE key = 'login_key';
+                     DELETE FROM meta WHERE key = 'login_key';
+
+                     CREATE TABLE IF NOT EXISTS web_sessions (
+                       id TEXT PRIMARY KEY,
+                       session_hash TEXT NOT NULL UNIQUE,
+                       created_at INTEGER NOT NULL,
+                       expires_at INTEGER NOT NULL,
+                       last_used_at INTEGER NOT NULL
+                     );
+                     CREATE INDEX IF NOT EXISTS idx_web_sessions_expires
+                       ON web_sessions(expires_at);
+
+                     CREATE TABLE IF NOT EXISTS admin_tokens (
+                       id TEXT PRIMARY KEY,
+                       name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+                       token_hash TEXT NOT NULL UNIQUE,
+                       prefix TEXT NOT NULL,
+                       scopes TEXT NOT NULL,
+                       created_at INTEGER NOT NULL,
+                       last_used_at INTEGER
+                     );",
+                )
+                .await?;
+            Ok(())
+        }
+
+        async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            manager
+                .get_connection()
+                .execute_unprepared(
+                    "DROP TABLE IF EXISTS admin_tokens;
+                     DROP TABLE IF EXISTS web_sessions;
+                     INSERT OR IGNORE INTO meta(key, value)
+                     SELECT 'login_key', value FROM meta WHERE key = 'encryption_key';
+                     DELETE FROM meta WHERE key = 'encryption_key';",
+                )
+                .await?;
+            Ok(())
+        }
+    }
+}
+
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -527,6 +588,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260812_000009_add_disabled_models::Migration),
             Box::new(m20260812_000010_add_account_type::Migration),
             Box::new(m20260814_000011_rename_persisted_login_key::Migration),
+            Box::new(m20260814_000012_add_management_auth::Migration),
         ]
     }
 }
@@ -605,7 +667,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(applied, 11);
+        assert_eq!(applied, 12);
         assert_eq!(has_proxy_id, 1);
         assert_eq!(has_client_key_enc, 1);
         assert_eq!(has_is_enabled, 1);
@@ -627,6 +689,15 @@ mod tests {
             )
             .unwrap();
         assert_eq!(has_disabled_models, 1);
+        let management_auth_tables: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type = 'table' AND name IN ('web_sessions', 'admin_tokens')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(management_auth_tables, 2);
 
         drop(connection);
         std::fs::remove_file(path).unwrap();
@@ -672,9 +743,9 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        let persisted_login_key: String = connection
+        let persisted_encryption_key: String = connection
             .query_row(
-                "SELECT value FROM meta WHERE key = 'login_key'",
+                "SELECT value FROM meta WHERE key = 'encryption_key'",
                 [],
                 |row| row.get(0),
             )
@@ -715,8 +786,16 @@ mod tests {
             )
             .unwrap();
         assert_eq!(name, "Existing");
-        assert_eq!(persisted_login_key, "persisted-key");
+        let obsolete_login_key_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM meta WHERE key = 'login_key'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(persisted_encryption_key, "persisted-key");
         assert_eq!(legacy_login_key_count, 0);
+        assert_eq!(obsolete_login_key_count, 0);
         assert_eq!(has_proxy_id, 1);
         assert_eq!(has_client_key_enc, 1);
         assert_eq!(is_enabled, 1);

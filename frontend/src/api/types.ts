@@ -121,6 +121,21 @@ export interface ClientApiKeyCreated extends ClientApiKey {
   api_key: string
 }
 
+export type AdminTokenScope = 'admin:read' | 'admin:write'
+
+export interface AdminToken {
+  id: string
+  name: string
+  prefix: string
+  scopes: AdminTokenScope[]
+  created_at: number
+  last_used_at: number | null
+}
+
+export interface AdminTokenCreated extends AdminToken {
+  token: string
+}
+
 export interface RequestLog {
   id: string
   created_at: number

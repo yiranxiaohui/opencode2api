@@ -9,7 +9,7 @@ use futures_util::StreamExt;
 use serde_json::{Value, json};
 
 use crate::error::ApiError;
-use crate::middleware::Authenticated;
+use crate::middleware::SecretsAvailable;
 use crate::routes::logs::{self, LogInput};
 use crate::state::AppState;
 
@@ -17,7 +17,7 @@ use crate::state::AppState;
 /// `/chat/completions` upstream.
 pub async fn messages(
     State(st): State<AppState>,
-    _: Authenticated,
+    _: SecretsAvailable,
     headers: HeaderMap,
     Json(input): Json<Value>,
 ) -> Response {

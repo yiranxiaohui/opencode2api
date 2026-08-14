@@ -10,12 +10,12 @@ use zeroize::Zeroizing;
 use crate::db::{Db, KeyRow};
 use crate::error::ApiError;
 
-pub const LOGIN_KEY_META: &str = "login_key";
+pub const ENCRYPTION_KEY_META: &str = "encryption_key";
 
 #[derive(Clone)]
 pub struct AppState {
     pub db: Arc<Db>,
-    /// AES-256 key derived from the login password and retained for the login session.
+    /// Persisted AES-256 key used by the gateway independently of web sessions.
     pub master_key: Arc<RwLock<Option<Zeroizing<[u8; crate::crypto::KEY_LEN]>>>>,
     /// Client used by the proxy: redirects disabled (token leak), long read timeout.
     pub proxy_client: Client,
@@ -35,7 +35,7 @@ impl AppState {
     pub fn new(db_path: &Path, web_dist: PathBuf) -> Result<Self, ApiError> {
         let db = Arc::new(Db::open(db_path)?);
         let persisted_key = db
-            .get_meta(LOGIN_KEY_META)?
+            .get_meta(ENCRYPTION_KEY_META)?
             .map(|encoded| crate::crypto::decode_master_key(&encoded))
             .transpose()?;
         let proxy_client = Client::builder()
@@ -136,9 +136,11 @@ impl AppState {
 
     pub async fn decrypt_secret(&self, enc: &str) -> Result<Zeroizing<String>, ApiError> {
         let guard = self.master_key.read().await;
-        let key = guard
-            .as_ref()
-            .ok_or_else(|| ApiError::Unauthorized("not logged in".into()))?;
+        let key = guard.as_ref().ok_or_else(|| {
+            ApiError::ServiceUnavailable(
+                "encryption key unavailable; log in once to restore service".into(),
+            )
+        })?;
         let pt = crate::crypto::decrypt(key, enc)?;
         let s = String::from_utf8(pt.to_vec())
             .map_err(|_| ApiError::Internal("secret is not valid utf-8".into()))?;
@@ -147,9 +149,11 @@ impl AppState {
 
     pub async fn encrypt_secret(&self, plain: &str) -> Result<String, ApiError> {
         let guard = self.master_key.read().await;
-        let key = guard
-            .as_ref()
-            .ok_or_else(|| ApiError::Unauthorized("not logged in".into()))?;
+        let key = guard.as_ref().ok_or_else(|| {
+            ApiError::ServiceUnavailable(
+                "encryption key unavailable; log in once to restore service".into(),
+            )
+        })?;
         crate::crypto::encrypt(key, plain.as_bytes())
     }
 }

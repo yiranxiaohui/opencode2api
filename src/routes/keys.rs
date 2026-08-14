@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::db::KeyData;
 use crate::error::ApiError;
-use crate::middleware::Authenticated;
+use crate::middleware::ManagementAuth;
 use crate::models::{
     AccountUsage, CookieImportInput, InviteLinkResult, KeyEnabledInput, KeyInput, KeyRecord,
     KeySummary, ModelInfo, OPENCODE_BASE_URL, OkResponse, TestResult, now_secs,
@@ -29,7 +29,7 @@ fn truncate(s: &str, max: usize) -> String {
 
 pub async fn list(
     State(st): State<AppState>,
-    _: Authenticated,
+    _: ManagementAuth,
     Query(params): Query<ListParams>,
 ) -> Result<Json<Vec<KeySummary>>, ApiError> {
     let mut items: Vec<KeySummary> = st
@@ -51,7 +51,7 @@ pub async fn list(
 
 pub async fn get_key(
     State(st): State<AppState>,
-    _: Authenticated,
+    _: ManagementAuth,
     Path(id): Path<String>,
 ) -> Result<Json<KeyRecord>, ApiError> {
     let row = st
@@ -68,7 +68,7 @@ pub async fn get_key(
 
 pub async fn create(
     State(st): State<AppState>,
-    _: Authenticated,
+    _: ManagementAuth,
     Json(input): Json<KeyInput>,
 ) -> Result<(StatusCode, Json<KeyRecord>), ApiError> {
     let plain = input
@@ -131,7 +131,7 @@ pub async fn create(
 
 pub async fn update(
     State(st): State<AppState>,
-    _: Authenticated,
+    _: ManagementAuth,
     Path(id): Path<String>,
     Json(input): Json<KeyInput>,
 ) -> Result<Json<KeyRecord>, ApiError> {
@@ -189,7 +189,7 @@ pub async fn update(
 
 pub async fn import_cookie(
     State(st): State<AppState>,
-    _: Authenticated,
+    _: ManagementAuth,
     Json(input): Json<CookieImportInput>,
 ) -> Result<(StatusCode, Json<KeyRecord>), ApiError> {
     let cookie = crate::opencode_account::normalize_cookie(&input.cookie)?;
@@ -243,7 +243,7 @@ fn summary(st: &AppState, row: &crate::db::KeyRow) -> KeySummary {
 
 pub async fn usage(
     State(st): State<AppState>,
-    _: Authenticated,
+    _: ManagementAuth,
     Path(id): Path<String>,
 ) -> Result<Json<AccountUsage>, ApiError> {
     let row = st
@@ -272,7 +272,7 @@ pub async fn usage(
 
 pub async fn get_invite_link(
     State(st): State<AppState>,
-    _: Authenticated,
+    _: ManagementAuth,
     Path(id): Path<String>,
 ) -> Result<Json<InviteLinkResult>, ApiError> {
     let row = st
@@ -298,7 +298,7 @@ pub async fn get_invite_link(
 
 pub async fn delete(
     State(st): State<AppState>,
-    _: Authenticated,
+    _: ManagementAuth,
     Path(id): Path<String>,
 ) -> Result<Json<OkResponse>, ApiError> {
     st.db
@@ -309,7 +309,7 @@ pub async fn delete(
 
 pub async fn set_enabled(
     State(st): State<AppState>,
-    _: Authenticated,
+    _: ManagementAuth,
     Path(id): Path<String>,
     Json(input): Json<KeyEnabledInput>,
 ) -> Result<Json<OkResponse>, ApiError> {
@@ -321,7 +321,7 @@ pub async fn set_enabled(
 
 pub async fn test(
     State(st): State<AppState>,
-    _: Authenticated,
+    _: ManagementAuth,
     Path(id): Path<String>,
 ) -> Result<Json<TestResult>, ApiError> {
     let row = st

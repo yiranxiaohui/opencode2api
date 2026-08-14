@@ -29,13 +29,10 @@ export async function request<T>(path: string, opts: ReqOpts = {}): Promise<T> {
 
   const res = await fetch(path, {
     ...opts,
+    credentials: opts.credentials ?? 'same-origin',
     headers,
     body: opts.json !== undefined ? JSON.stringify(opts.json) : opts.body,
   })
-
-  if (res.status === 401 && !path.startsWith('/api/auth/')) {
-    handleUnauthorized()
-  }
 
   if (!res.ok) {
     let message = res.statusText
@@ -44,6 +41,9 @@ export async function request<T>(path: string, opts: ReqOpts = {}): Promise<T> {
       if (body?.error) message = typeof body.error === 'string' ? body.error : body.error.message
     } catch {
       /* keep statusText */
+    }
+    if (res.status === 401 && message.includes('web login')) {
+      handleUnauthorized()
     }
     throw new ApiError(res.status, message)
   }

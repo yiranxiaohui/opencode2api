@@ -13,6 +13,7 @@ API Key 使用 **登录密码派生密钥 AES-256-GCM 加密** 后存于 SQLite�
 - **模型管理**：汇总账号支持的模型，可全局启用或禁用并控制网关访问
 - **统一代理**：`POST /v1/chat/completions` 等，SSE 流式原样透传；使用会话粘性哈希在支持请求模型的账号池中负载均衡，避免连续对话切换账号导致缓存未命中
 - **访问密钥**：为调用代理的客户端自动生成独立 API Key，可随时撤销
+- **管理 API Token**：为自动化脚本创建独立的只读或读写 Bearer Token，支持审计最后使用时间与随时撤销
 - **代理池**：管理一组 HTTP / HTTPS / SOCKS5 出口转发代理，每个账号可挂一个；网关转发、连通性测试、`/v1/models` 聚合均走该代理
 - **多协议模型路由**：同一账号可同时使用 Chat Completions、Responses 和 Anthropic Messages 模型；原生 Messages 模型直接透传，其余模型仍支持 Messages → Chat Completions 兼容转换
 - **请求日志与用量统计**：按客户端密钥、路由账号、模型和状态筛选请求，记录延迟、首 Token 延迟以及输入、输出和缓存 Token 用量
@@ -75,6 +76,15 @@ print(client.chat.completions.create(
 ))
 ```
 
+管理 API Token 可在「设置」中创建。完整 Token 仅显示一次：
+
+```bash
+curl http://127.0.0.1:8787/api/keys \
+  -H "Authorization: Bearer oca_admin_..."
+```
+
+`admin:read` 权限允许 `GET`/`HEAD` 请求，`admin:write` 权限允许其他修改请求。管理 Token 与网页登录、退出登录及 `/v1/*` 客户端访问密钥相互独立。
+
 ## 配置（环境变量，均可选）
 
 | 变量 | 默认值 | 说明 |
@@ -90,6 +100,7 @@ print(client.chat.completions.create(
 |---|---|---|
 | `GET` | `/api/status` | `{installed, logged_in, key_count}` |
 | `POST` | `/api/auth/setup` / `login` / `logout` / `change-password` | 初始化、登录、退出登录与修改登录密码 |
+| `GET`/`POST`/`DELETE` | `/api/admin-tokens[/{id}]` | 管理独立 Bearer Token（仅限网页登录并验证密码） |
 | `GET` | `/api/keys?q=&tag=` | 账号列表（不含 Key） |
 | `GET` | `/api/keys/{id}` | 账号详情（含解密 Key） |
 | `POST`/`PUT`/`DELETE` | `/api/keys[/{id}]` | 增删改 |
@@ -122,10 +133,13 @@ OpenCode Zen 会根据模型使用不同协议。客户端仍统一连接本服�
 ## 安全说明
 
 - 仅绑定回环地址；**没有**开放 CORS —— 浏览器同源才能访问，防恶意网页调用代理。
+- 如修改监听地址向其他主机开放，必须放在 HTTPS 反向代理后；Cookie、管理 Token 和客户端密钥都应视为高敏感凭据。
+- 网页登录使用只存哈希的 HttpOnly、SameSite=Strict 会话 Cookie；每个浏览器会话相互独立。
+- 管理 API Token 具有 `admin:read` / `admin:write` 权限范围，数据库只保存 SHA-256 哈希，完整 Token 仅在创建时返回一次。
 - 上游请求禁跟随重定向，避免 Bearer Token 泄露给第三方主机。
 - 登录密码经 argon2id（`m=19456,t=2,p=1`）派生 AES-256 密钥，Key 与代理 URL（可能含凭据）
-  逐个用随机 nonce 加密；派生密钥在登录期间持久化，使服务重启后能够自动恢复，并在退出登录时删除。
-- 持久化的登录密钥与密文保存在同一数据目录，因此该设计用于避免凭据明文落盘，不能抵御整个数据目录被窃取的情况。请使用操作系统权限和磁盘加密保护数据目录。
+  逐个用随机 nonce 加密；加密密钥持久化后由网关使用，不依赖某个网页会话。
+- 持久化的加密密钥与密文保存在同一数据目录，因此该设计用于避免凭据明文落盘，不能抵御整个数据目录被窃取的情况。请使用操作系统权限和磁盘加密保护数据目录。
 - 明文 Key 只短暂存在于进程内存，绝不落盘、不写日志。
 
 ## 目录结构
@@ -139,8 +153,8 @@ src/
 ├── migration/       # SeaORM Migration 数据库版本迁移
 ├── state.rs         # AppState（DB、内存密钥、reqwest 客户端）
 ├── error.rs         # 统一错误
-├── middleware.rs    # 登录状态校验（401）
-└── routes/          # auth / keys / import_export / proxy
+├── middleware.rs    # 网页会话、管理 Token 与网关状态校验
+└── routes/          # auth / admin_tokens / keys / import_export / proxy
 frontend/src/
 ├── App.tsx          # 设置/登录/主界面切换
 ├── api/             # fetch 封装 + 类型

@@ -7,9 +7,11 @@ use serde_json::json;
 pub enum ApiError {
     BadRequest(String),
     Unauthorized(String),
+    Forbidden(String),
     Conflict(String),
     NotFound(String),
     Internal(String),
+    ServiceUnavailable(String),
     Upstream(String),
 }
 
@@ -18,20 +20,24 @@ impl ApiError {
         match self {
             ApiError::BadRequest(_) => StatusCode::BAD_REQUEST,
             ApiError::Unauthorized(_) => StatusCode::UNAUTHORIZED,
+            ApiError::Forbidden(_) => StatusCode::FORBIDDEN,
             ApiError::Conflict(_) => StatusCode::CONFLICT,
             ApiError::NotFound(_) => StatusCode::NOT_FOUND,
             ApiError::Upstream(_) => StatusCode::BAD_GATEWAY,
             ApiError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            ApiError::ServiceUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
         }
     }
 
     pub fn message(&self) -> String {
         match self {
             ApiError::Unauthorized(m)
+            | ApiError::Forbidden(m)
             | ApiError::BadRequest(m)
             | ApiError::Conflict(m)
             | ApiError::NotFound(m)
             | ApiError::Internal(m)
+            | ApiError::ServiceUnavailable(m)
             | ApiError::Upstream(m) => m.clone(),
         }
     }

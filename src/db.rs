@@ -82,6 +82,16 @@ pub struct ClientKeyRow {
 }
 
 #[derive(Debug, Clone)]
+pub struct AdminTokenRow {
+    pub id: String,
+    pub name: String,
+    pub prefix: String,
+    pub scopes: Vec<String>,
+    pub created_at: i64,
+    pub last_used_at: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
 pub struct RequestLogRow {
     pub id: String,
     pub created_at: i64,
@@ -143,6 +153,18 @@ fn row_to_key(r: &rusqlite::Row) -> rusqlite::Result<KeyRow> {
     })
 }
 
+fn admin_token_from_row(r: &rusqlite::Row) -> rusqlite::Result<AdminTokenRow> {
+    let scopes_json: String = r.get(3)?;
+    Ok(AdminTokenRow {
+        id: r.get(0)?,
+        name: r.get(1)?,
+        prefix: r.get(2)?,
+        scopes: serde_json::from_str(&scopes_json).unwrap_or_default(),
+        created_at: r.get(4)?,
+        last_used_at: r.get(5)?,
+    })
+}
+
 pub struct Db(Mutex<Connection>);
 
 impl Db {
@@ -180,10 +202,108 @@ impl Db {
         Ok(())
     }
 
-    pub fn delete_meta(&self, key: &str) -> Result<(), ApiError> {
+    // ---- web sessions ------------------------------------------------------
+
+    pub fn insert_web_session(
+        &self,
+        id: &str,
+        session_hash: &str,
+        created_at: i64,
+        expires_at: i64,
+    ) -> Result<(), ApiError> {
         let conn = self.0.lock().unwrap();
-        conn.execute("DELETE FROM meta WHERE key = ?1", params![key])?;
+        conn.execute(
+            "DELETE FROM web_sessions WHERE expires_at <= ?1",
+            params![created_at],
+        )?;
+        conn.execute(
+            "INSERT INTO web_sessions(id, session_hash, created_at, expires_at, last_used_at)
+             VALUES(?1, ?2, ?3, ?4, ?3)",
+            params![id, session_hash, created_at, expires_at],
+        )?;
         Ok(())
+    }
+
+    pub fn authenticate_web_session(&self, session_hash: &str, now: i64) -> Result<bool, ApiError> {
+        let conn = self.0.lock().unwrap();
+        let updated = conn.execute(
+            "UPDATE web_sessions SET last_used_at = ?2
+             WHERE session_hash = ?1 AND expires_at > ?2",
+            params![session_hash, now],
+        )?;
+        if updated == 0 {
+            conn.execute(
+                "DELETE FROM web_sessions WHERE session_hash = ?1 AND expires_at <= ?2",
+                params![session_hash, now],
+            )?;
+        }
+        Ok(updated > 0)
+    }
+
+    pub fn delete_web_session(&self, session_hash: &str) -> Result<(), ApiError> {
+        let conn = self.0.lock().unwrap();
+        conn.execute(
+            "DELETE FROM web_sessions WHERE session_hash = ?1",
+            params![session_hash],
+        )?;
+        Ok(())
+    }
+
+    // ---- management API tokens -------------------------------------------
+
+    pub fn list_admin_tokens(&self) -> Result<Vec<AdminTokenRow>, ApiError> {
+        let conn = self.0.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, prefix, scopes, created_at, last_used_at
+             FROM admin_tokens ORDER BY created_at DESC",
+        )?;
+        let rows = stmt.query_map([], admin_token_from_row)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub fn insert_admin_token(
+        &self,
+        id: &str,
+        name: &str,
+        token_hash: &str,
+        prefix: &str,
+        scopes: &[String],
+        created_at: i64,
+    ) -> Result<(), ApiError> {
+        let conn = self.0.lock().unwrap();
+        let scopes = serde_json::to_string(scopes)?;
+        conn.execute(
+            "INSERT INTO admin_tokens(id, name, token_hash, prefix, scopes, created_at)
+             VALUES(?1, ?2, ?3, ?4, ?5, ?6)",
+            params![id, name, token_hash, prefix, scopes, created_at],
+        )?;
+        Ok(())
+    }
+
+    pub fn admin_token_by_hash(&self, token_hash: &str) -> Result<Option<AdminTokenRow>, ApiError> {
+        let conn = self.0.lock().unwrap();
+        conn.query_row(
+            "SELECT id, name, prefix, scopes, created_at, last_used_at
+             FROM admin_tokens WHERE token_hash = ?1",
+            params![token_hash],
+            admin_token_from_row,
+        )
+        .optional()
+        .map_err(ApiError::from)
+    }
+
+    pub fn touch_admin_token(&self, id: &str, now: i64) -> Result<(), ApiError> {
+        let conn = self.0.lock().unwrap();
+        conn.execute(
+            "UPDATE admin_tokens SET last_used_at = ?2 WHERE id = ?1",
+            params![id, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_admin_token(&self, id: &str) -> Result<bool, ApiError> {
+        let conn = self.0.lock().unwrap();
+        Ok(conn.execute("DELETE FROM admin_tokens WHERE id = ?1", params![id])? > 0)
     }
 
     // ---- client API keys ---------------------------------------------------

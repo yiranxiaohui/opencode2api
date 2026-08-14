@@ -4,6 +4,7 @@ use tower_http::services::{ServeDir, ServeFile};
 
 use crate::state::AppState;
 
+pub mod admin_tokens;
 pub mod auth;
 pub mod client_keys;
 pub mod import_export;
@@ -32,6 +33,11 @@ pub fn build_router(state: AppState) -> Router {
         .route("/auth/login", post(auth::login))
         .route("/auth/logout", post(auth::logout))
         .route("/auth/change-password", post(auth::change_password))
+        .route(
+            "/admin-tokens",
+            get(admin_tokens::list).post(admin_tokens::create),
+        )
+        .route("/admin-tokens/{id}", delete(admin_tokens::revoke))
         .route(
             "/client-keys",
             get(client_keys::list).post(client_keys::create),

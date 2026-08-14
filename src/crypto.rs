@@ -13,12 +13,24 @@ use crate::error::ApiError;
 
 pub const KEY_LEN: usize = 32; // AES-256 key = argon2 default output length
 
-pub fn generate_client_key() -> String {
+fn generate_random_token(prefix: &str) -> String {
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 
     let mut bytes = [0u8; 32];
     OsRng.fill_bytes(&mut bytes);
-    format!("sk-{}", URL_SAFE_NO_PAD.encode(bytes))
+    format!("{prefix}{}", URL_SAFE_NO_PAD.encode(bytes))
+}
+
+pub fn generate_client_key() -> String {
+    generate_random_token("sk-")
+}
+
+pub fn generate_admin_token() -> String {
+    generate_random_token("oca_admin_")
+}
+
+pub fn generate_web_session_token() -> String {
+    generate_random_token("oca_session_")
 }
 
 pub fn hash_client_key(key: &str) -> String {
@@ -158,6 +170,12 @@ mod tests {
         assert_ne!(a, b);
         assert_eq!(hash_client_key(&a), hash_client_key(&a));
         assert_ne!(hash_client_key(&a), hash_client_key(&b));
+    }
+
+    #[test]
+    fn management_tokens_have_distinct_prefixes() {
+        assert!(generate_admin_token().starts_with("oca_admin_"));
+        assert!(generate_web_session_token().starts_with("oca_session_"));
     }
 
     #[test]

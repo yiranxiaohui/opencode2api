@@ -537,6 +537,33 @@ select.input { appearance: none; }
 
 .empty-tags { font-size: 12px; color: var(--faint); padding: 2px 0; }
 
+/* ---------- Settings & management tokens ---------- */
+
+.settings-page { max-width: 920px; display: flex; flex-direction: column; gap: 16px; }
+.settings-status-panel { padding: 18px 20px; display: flex; gap: 14px; align-items: center; }
+.settings-panel { padding: 20px; }
+.settings-mark { margin: 0; width: 42px; height: 42px; flex: none; }
+.settings-title { font-weight: 600; margin-bottom: 2px; }
+.settings-section-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.settings-section-head h2 { margin: 0; font-size: 16px; }
+.settings-section-head p { margin: 3px 0 0; }
+.admin-token-created { border: 1px solid var(--accent-line); background: var(--accent-soft); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 18px; }
+.admin-token-created p { margin: 2px 0 10px; }
+.admin-token-secret { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.admin-token-secret code { flex: 1; min-width: 0; overflow: auto; padding: 8px 10px; color: var(--accent); background: var(--bg-2); border-radius: 5px; font: 12px var(--mono); white-space: nowrap; }
+.admin-token-form { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; padding-bottom: 18px; border-bottom: 1px solid var(--border); }
+.admin-token-form > .btn { justify-self: start; }
+.admin-token-scope-field { grid-column: 1 / -1; flex-direction: row; align-items: center; gap: 18px; }
+.admin-token-scope-field > label:first-child { margin-right: 2px; }
+.admin-token-list { margin-top: 18px; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.admin-token-list-head { display: flex; align-items: baseline; gap: 7px; padding: 10px 14px; background: var(--bg-2); border-bottom: 1px solid var(--border); }
+.admin-token-list-head .count { color: var(--faint); font: 11px var(--mono); }
+.admin-token-row { display: grid; grid-template-columns: minmax(150px, 1fr) auto minmax(210px, auto) auto; align-items: center; gap: 14px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+.admin-token-row:last-child { border-bottom: 0; }
+.admin-token-row:hover { background: var(--panel-2); }
+.admin-token-scopes { display: flex; gap: 5px; }
+.admin-token-empty { padding: 28px 14px; text-align: center; }
+
 /* ---------- Client API keys ---------- */
 
 .settings-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
@@ -734,4 +761,10 @@ select.input { appearance: none; }
   .content { padding: 16px 14px 60px; }
   .client-key-create-form { align-items: stretch; flex-direction: column; }
   .client-key-list-head > .small { display: none; }
+  .admin-token-form { grid-template-columns: 1fr; }
+  .admin-token-scope-field { grid-column: auto; flex-direction: column; align-items: flex-start; gap: 7px; }
+  .admin-token-row { grid-template-columns: 1fr auto; }
+  .admin-token-row > :nth-child(2), .admin-token-row > :nth-child(3) { grid-column: 1; }
+  .admin-token-row > .btn { grid-column: 2; grid-row: 1 / 4; }
+  .admin-token-secret { align-items: stretch; flex-direction: column; }
 }
