@@ -131,7 +131,7 @@ export default function BrowserLoginModal({ proxies, onClose, onImported }: Prop
               </p>
               <label className="field"><span>账号名称（可选）</span><input className="input" value={name} onChange={(event) => setName(event.target.value)} placeholder="自动使用账号邮箱或 workspace" /></label>
               <label className="field"><span>账号类型</span><select className="input" value={accountType} onChange={(event) => setAccountType(event.target.value as 'normal' | 'go')}><option value="normal">普通账号</option><option value="go">Go 订阅账号</option></select></label>
-              <label className="field"><span>绑定代理</span><select className="input" value={proxyId} onChange={(event) => setProxyId(event.target.value)}><option value="">直连</option>{proxies.map((proxy) => <option key={proxy.id} value={proxy.id}>{proxy.name}</option>)}</select><span className="hint">登录窗口从服务器直连；所选代理用于验证 Cookie 和账号后续请求。</span></label>
+              <label className="field"><span>绑定代理</span><select className="input" value={proxyId} onChange={(event) => setProxyId(event.target.value)}><option value="">直连</option>{proxies.map((proxy) => <option key={proxy.id} value={proxy.id}>{proxy.name}</option>)}</select><span className="hint">所选代理同时用于浏览器登录、Cookie 验证和账号后续请求；固定出口代理会保持同一 IP。</span></label>
               {error && <p className="browser-login-error" role="alert">{error}</p>}
               <p className="small browser-login-security">浏览器配置只保存在临时目录，不会写入数据卷；会话结束或 15 分钟超时后自动销毁。</p>
             </div>

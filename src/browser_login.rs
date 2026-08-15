@@ -18,10 +18,12 @@ use tokio::sync::Mutex;
 use tokio::time::{sleep, timeout};
 use tokio_tungstenite::connect_async;
 use uuid::Uuid;
+use zeroize::Zeroizing;
 
 use crate::error::ApiError;
 use crate::middleware::ManagementAuth;
 use crate::models::{AccountType, CookieImportInput, KeyRecord, now_secs};
+use crate::proxy_bridge::ProxyBridge;
 use crate::state::AppState;
 
 const LOGIN_URL: &str = "https://opencode.ai/auth";
@@ -58,12 +60,14 @@ struct BrowserSession {
     id: String,
     expires_at: i64,
     input: BrowserLoginInput,
+    proxy_revision: Option<String>,
     vnc_addr: SocketAddr,
     cdp_port: u16,
     profile_dir: PathBuf,
     chromium: Child,
     x11vnc: Child,
     xvfb: Child,
+    _proxy_bridge: Option<ProxyBridge>,
 }
 
 impl Drop for BrowserSession {
@@ -96,7 +100,12 @@ impl BrowserLoginManager {
         Self::default()
     }
 
-    pub async fn start(&self, input: BrowserLoginInput) -> Result<BrowserLoginStarted, ApiError> {
+    pub async fn start(
+        &self,
+        input: BrowserLoginInput,
+        proxy_url: Option<Zeroizing<String>>,
+        proxy_revision: Option<String>,
+    ) -> Result<BrowserLoginStarted, ApiError> {
         let mut slot = self.session.lock().await;
         if let Some(current) = slot.as_mut()
             && current.is_running()?
@@ -109,7 +118,12 @@ impl BrowserLoginManager {
             stale.stop().await;
         }
 
-        let session = launch_session(input).await?;
+        let session = launch_session(
+            input,
+            proxy_url.as_ref().map(|url| url.as_str()),
+            proxy_revision,
+        )
+        .await?;
         let started = BrowserLoginStarted {
             id: session.id.clone(),
             expires_at: session.expires_at,
@@ -149,14 +163,23 @@ impl BrowserLoginManager {
         self.with_session(id, |session| Ok(session.vnc_addr)).await
     }
 
-    pub async fn capture(&self, id: &str) -> Result<(String, BrowserLoginInput), ApiError> {
-        let (port, input) = self
-            .with_session(id, |session| Ok((session.cdp_port, session.input.clone())))
+    pub async fn capture(
+        &self,
+        id: &str,
+    ) -> Result<(String, BrowserLoginInput, Option<String>), ApiError> {
+        let (port, input, proxy_revision) = self
+            .with_session(id, |session| {
+                Ok((
+                    session.cdp_port,
+                    session.input.clone(),
+                    session.proxy_revision.clone(),
+                ))
+            })
             .await?;
         let cookie = timeout(Duration::from_secs(5), cdp_cookie_header(port))
             .await
             .map_err(|_| ApiError::ServiceUnavailable("读取 Chromium Cookie 超时".into()))??;
-        Ok((cookie, input))
+        Ok((cookie, input, proxy_revision))
     }
 
     pub async fn ready(&self, id: &str) -> Result<bool, ApiError> {
@@ -184,12 +207,23 @@ pub async fn start(
     _: ManagementAuth,
     Json(input): Json<BrowserLoginInput>,
 ) -> Result<Json<BrowserLoginStarted>, ApiError> {
-    if let Some(proxy_id) = input.proxy_id.as_deref()
-        && st.db.get_proxy(proxy_id)?.is_none()
-    {
-        return Err(ApiError::BadRequest("proxy not found".into()));
-    }
-    Ok(Json(st.browser_login.start(input).await?))
+    let (proxy_url, proxy_revision) = if let Some(proxy_id) = input.proxy_id.as_deref() {
+        let proxy = st
+            .db
+            .get_proxy(proxy_id)?
+            .ok_or_else(|| ApiError::BadRequest("proxy not found".into()))?;
+        (
+            Some(st.decrypt_secret(&proxy.url_enc).await?),
+            Some(proxy.url_enc),
+        )
+    } else {
+        (None, None)
+    };
+    Ok(Json(
+        st.browser_login
+            .start(input, proxy_url, proxy_revision)
+            .await?,
+    ))
 }
 
 pub async fn capture(
@@ -197,7 +231,18 @@ pub async fn capture(
     _: ManagementAuth,
     AxumPath(id): AxumPath<String>,
 ) -> Result<(axum::http::StatusCode, Json<KeyRecord>), ApiError> {
-    let (cookie, input) = st.browser_login.capture(&id).await?;
+    let (cookie, input, proxy_revision) = st.browser_login.capture(&id).await?;
+    if let (Some(proxy_id), Some(expected_revision)) = (input.proxy_id.as_deref(), proxy_revision) {
+        let proxy = st
+            .db
+            .get_proxy(proxy_id)?
+            .ok_or_else(|| ApiError::BadRequest("登录期间绑定代理已被删除，请重新登录".into()))?;
+        if proxy.url_enc != expected_revision {
+            return Err(ApiError::BadRequest(
+                "登录期间绑定代理已被修改，请重新登录以保持出口 IP 一致".into(),
+            ));
+        }
+    }
     let record = crate::routes::keys::import_cookie_record(
         &st,
         CookieImportInput {
@@ -282,8 +327,16 @@ async fn proxy_vnc(socket: WebSocket, addr: SocketAddr) -> Result<(), ApiError> 
     Ok(())
 }
 
-async fn launch_session(input: BrowserLoginInput) -> Result<BrowserSession, ApiError> {
+async fn launch_session(
+    input: BrowserLoginInput,
+    proxy_url: Option<&str>,
+    proxy_revision: Option<String>,
+) -> Result<BrowserSession, ApiError> {
     let chromium_bin = chromium_binary()?;
+    let proxy_bridge = match proxy_url {
+        Some(url) => Some(ProxyBridge::start(url).await?),
+        None => None,
+    };
     let display = available_display()?;
     let vnc_port = available_port().await?;
     let mut cdp_port = available_port().await?;
@@ -374,6 +427,12 @@ async fn launch_session(input: BrowserLoginInput) -> Result<BrowserSession, ApiE
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .kill_on_drop(true);
+    if let Some(bridge) = proxy_bridge.as_ref() {
+        chromium_command
+            .arg(format!("--proxy-server=http://{}", bridge.addr()))
+            .arg("--disable-quic")
+            .arg("--force-webrtc-ip-handling-policy=disable_non_proxied_udp");
+    }
     if env_flag("OPENCODE2API_CHROMIUM_NO_SANDBOX") {
         chromium_command.arg("--no-sandbox");
     }
@@ -400,12 +459,14 @@ async fn launch_session(input: BrowserLoginInput) -> Result<BrowserSession, ApiE
         id,
         expires_at: now_secs() + SESSION_TTL.as_secs() as i64,
         input,
+        proxy_revision,
         vnc_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), vnc_port),
         cdp_port,
         profile_dir,
         chromium,
         x11vnc,
         xvfb,
+        _proxy_bridge: proxy_bridge,
     })
 }
 

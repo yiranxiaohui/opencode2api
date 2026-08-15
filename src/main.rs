@@ -12,6 +12,7 @@ mod middleware;
 mod migration;
 mod models;
 mod opencode_account;
+mod proxy_bridge;
 mod routes;
 mod state;
 

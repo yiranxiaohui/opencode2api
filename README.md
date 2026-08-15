@@ -9,7 +9,7 @@ API Key 使用 **登录密码派生密钥 AES-256-GCM 加密** 后存于 SQLite�
 ## 功能
 
 - **账号管理**：增删改查、搜索、标签筛选、启用/禁用
-- **网页登录导入**：在无桌面的服务器中启动临时 Chromium，通过网页虚拟桌面手动登录并自动读取 Cookie、发现 workspace 与 API Key
+- **网页登录导入**：在无桌面的服务器中启动临时 Chromium，通过网页虚拟桌面手动登录并自动读取 Cookie、发现 workspace 与 API Key；可让登录与账号使用绑定同一个代理出口
 - **连通性测试**：一键请求 OpenCode 官方 `/models`，显示延迟与模型列表并缓存
 - **模型管理**：汇总账号支持的模型，可全局启用或禁用并控制网关访问
 - **统一代理**：`POST /v1/chat/completions` 等，SSE 流式原样透传；使用会话粘性哈希在支持请求模型的账号池中负载均衡，避免连续对话切换账号导致缓存未命中
@@ -154,17 +154,19 @@ OpenCode Zen 会根据模型使用不同协议。客户端仍统一连接本服�
 - 持久化的加密密钥与密文保存在同一数据目录，因此该设计用于避免凭据明文落盘，不能抵御整个数据目录被窃取的情况。请使用操作系统权限和磁盘加密保护数据目录。
 - 明文 Key 只短暂存在于进程内存，绝不落盘、不写日志。
 - 网页登录会话同一时间只允许一个，使用独立的临时 Chromium 配置，15 分钟后自动结束；VNC 仅监听容器回环地址，并由已登录的同源管理 WebSocket 转发。
-- 网页登录的 Chromium 默认保留沙箱。不要轻易启用 `OPENCODE2API_CHROMIUM_NO_SANDBOX`；登录窗口从服务器直连，账号绑定代理仅用于 Cookie 验证和后续网关请求。
+- 网页登录的 Chromium 默认保留沙箱。不要轻易启用 `OPENCODE2API_CHROMIUM_NO_SANDBOX`；选择代理后，临时回环代理桥会让 Chromium、Cookie 验证和后续网关请求使用同一个 HTTP、HTTPS、SOCKS5 或 SOCKS5H 出口，并支持代理用户名密码。
 
 ## 目录结构
 
 ```
 src/
 ├── main.rs          # 入口
+├── browser_login.rs # 无桌面 Chromium 网页登录与 Cookie 读取
 ├── config.rs        # 环境变量配置
 ├── crypto.rs        # argon2id 派生 + AES-GCM 加解密（安全核心）
 ├── db.rs            # rusqlite CRUD
 ├── migration/       # SeaORM Migration 数据库版本迁移
+├── proxy_bridge.rs  # Chromium 到账号绑定代理的临时回环桥
 ├── state.rs         # AppState（DB、内存密钥、reqwest 客户端）
 ├── error.rs         # 统一错误
 ├── middleware.rs    # 网页会话、管理 Token 与网关状态校验
@@ -217,7 +219,8 @@ docker run -d \
 
 - 导出文件含明文 Key，请妥善保管
 - 请求日志与 Token 用量统计保存在本地；套餐额度查询仅支持通过 Cookie 导入的账号
-- 网页登录窗口从服务器 IP 直连 OpenCode，不使用账号绑定的转发代理
+- 网页登录同一时间只允许一个临时浏览器会话
+- 如上游是每次连接自动换 IP 的轮换代理，需要在代理服务商侧配置粘性会话；本服务保证复用同一代理配置，但无法阻止上游自行更换出口
 - 暂无多用户 / 共享访问（设计为单人本地工具）
 
 ## 许可证
