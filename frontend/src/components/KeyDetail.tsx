@@ -70,7 +70,7 @@ export default function KeyDetail({ summary, onClose, onEdit, onDelete, onSetEna
     try {
       const nextUsage = await keysApi.usage(summary.id)
       setUsage(nextUsage)
-      const nextAccountType = nextUsage.plan_name.toLowerCase().includes('go') ? 'go' : accountType
+      const nextAccountType = nextUsage.plan_name.toLowerCase() === 'opencode go' ? 'go' : 'normal'
       setAccountType(nextAccountType)
       queryClient.setQueryData<KeySummary[]>(keysQueryKey, (current) =>
         current?.map((item) => item.id === summary.id ? { ...item, usage_cache: nextUsage, account_type: nextAccountType } : item),

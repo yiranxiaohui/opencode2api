@@ -44,8 +44,11 @@ export default function KeyList({ keys, selectedId, onOpen, onTest, onEdit, onDe
     setQueryingIds((current) => new Set(current).add(key.id))
     try {
       const usage = await keysApi.usage(key.id)
+      const nextAccountType = usage.plan_name.toLowerCase() === 'opencode go' ? 'go' : 'normal'
       queryClient.setQueryData<KeySummary[]>(keysQueryKey, (current) =>
-        current?.map((item) => item.id === key.id ? { ...item, usage_cache: usage } : item),
+        current?.map((item) => item.id === key.id
+          ? { ...item, usage_cache: usage, account_type: nextAccountType }
+          : item),
       )
       toast(`${key.name} 额度已更新`, 'ok')
     } catch (error) {

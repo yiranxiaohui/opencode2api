@@ -231,11 +231,19 @@ pub async fn usage(
 }
 
 fn plan_name(subscription: &str, billing: &str) -> String {
-    if string(subscription, "liteSubscriptionID").is_some() {
+    // OpenCode currently returns the Go subscription id from billing.get.
+    // Keep checking lite.subscription.get as well for older response shapes.
+    if has_go_subscription(subscription, billing) {
         "OpenCode Go".to_string()
     } else {
         string(billing, "subscriptionPlan").unwrap_or_else(|| "OpenCode Zen".to_string())
     }
+}
+
+fn has_go_subscription(subscription: &str, billing: &str) -> bool {
+    [billing, subscription]
+        .iter()
+        .any(|body| string(body, "liteSubscriptionID").is_some_and(|id| !id.trim().is_empty()))
 }
 
 pub async fn invite_link(
@@ -325,6 +333,25 @@ mod tests {
         assert_eq!(
             plan_name(r#"{liteSubscriptionID:"sub_123"}"#, "{}"),
             "OpenCode Go"
+        );
+    }
+
+    #[test]
+    fn detects_go_from_billing_response() {
+        assert_eq!(
+            plan_name(
+                r#"{region:"us",rollingUsage:null}"#,
+                r#"{subscription:$R[1]={liteSubscriptionID:"sub_123"}}"#,
+            ),
+            "OpenCode Go"
+        );
+    }
+
+    #[test]
+    fn ignores_empty_go_subscription_id() {
+        assert_eq!(
+            plan_name("{}", r#"{liteSubscriptionID:""}"#),
+            "OpenCode Zen"
         );
     }
 
