@@ -15,7 +15,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
-use tokio::time::{sleep, timeout};
+use tokio::task::JoinHandle;
+use tokio::time::{Instant, sleep, timeout};
 use tokio_tungstenite::connect_async;
 use uuid::Uuid;
 use zeroize::Zeroizing;
@@ -29,6 +30,46 @@ use crate::state::AppState;
 const LOGIN_URL: &str = "https://opencode.ai/auth";
 const SESSION_TTL: Duration = Duration::from_secs(15 * 60);
 const PROCESS_START_TIMEOUT: Duration = Duration::from_secs(15);
+const ALIPAY_SELECTION_INTERVAL: Duration = Duration::from_millis(500);
+const ALIPAY_CLICK_EXPRESSION: &str = r#"
+(() => {
+  const normalize = (value) => (value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const visible = (element) => {
+    const style = window.getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return style.display !== 'none'
+      && style.visibility !== 'hidden'
+      && Number(style.opacity || 1) > 0
+      && rect.width > 0
+      && rect.height > 0;
+  };
+  const elements = Array.from(document.querySelectorAll('body *'));
+  const heading = elements.find((element) => {
+    if (!visible(element)) return false;
+    const text = normalize(element.innerText);
+    return text === 'select payment method' || text === '选择支付方式';
+  });
+  if (!heading) return false;
+
+  let container = heading.parentElement;
+  while (container && container !== document.body) {
+    const alipay = Array.from(container.querySelectorAll('*')).find((element) => {
+      if (!visible(element)) return false;
+      const text = normalize(element.innerText);
+      return text === 'alipay' || text === '支付宝';
+    });
+    if (alipay) {
+      if (alipay.closest('button:disabled, [aria-disabled="true"]')) return false;
+      const control = alipay.closest('button, a, [role="button"], [tabindex]');
+      const target = control && container.contains(control) ? control : alipay;
+      target.click();
+      return true;
+    }
+    container = container.parentElement;
+  }
+  return false;
+})()
+"#;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct BrowserLoginInput {
@@ -67,6 +108,7 @@ struct BrowserSession {
     chromium: Child,
     x11vnc: Child,
     xvfb: Child,
+    alipay_selector: Option<JoinHandle<()>>,
     _proxy_bridge: Option<ProxyBridge>,
 }
 
@@ -75,6 +117,9 @@ impl Drop for BrowserSession {
         let _ = self.chromium.start_kill();
         let _ = self.x11vnc.start_kill();
         let _ = self.xvfb.start_kill();
+        if let Some(selector) = self.alipay_selector.take() {
+            selector.abort();
+        }
         let _ = std::fs::remove_dir_all(&self.profile_dir);
     }
 }
@@ -106,8 +151,15 @@ impl BrowserLoginManager {
         proxy_url: Option<Zeroizing<String>>,
         proxy_revision: Option<String>,
     ) -> Result<BrowserLoginStarted, ApiError> {
-        self.start_session(Some(input), LOGIN_URL, None, proxy_url, proxy_revision)
-            .await
+        self.start_session(
+            Some(input),
+            LOGIN_URL,
+            None,
+            proxy_url,
+            proxy_revision,
+            false,
+        )
+        .await
     }
 
     pub async fn start_account_page(
@@ -116,7 +168,7 @@ impl BrowserLoginManager {
         cookie: Zeroizing<String>,
         proxy_url: Option<Zeroizing<String>>,
     ) -> Result<BrowserLoginStarted, ApiError> {
-        self.start_session(None, &target_url, Some(&cookie), proxy_url, None)
+        self.start_session(None, &target_url, Some(&cookie), proxy_url, None, true)
             .await
     }
 
@@ -127,6 +179,7 @@ impl BrowserLoginManager {
         cookie: Option<&str>,
         proxy_url: Option<Zeroizing<String>>,
         proxy_revision: Option<String>,
+        auto_select_alipay: bool,
     ) -> Result<BrowserLoginStarted, ApiError> {
         let mut slot = self.session.lock().await;
         if let Some(current) = slot.as_mut()
@@ -146,6 +199,7 @@ impl BrowserLoginManager {
             cookie,
             proxy_url.as_ref().map(|url| url.as_str()),
             proxy_revision,
+            auto_select_alipay,
         )
         .await?;
         let started = BrowserLoginStarted {
@@ -393,6 +447,7 @@ async fn launch_session(
     cookie: Option<&str>,
     proxy_url: Option<&str>,
     proxy_revision: Option<String>,
+    auto_select_alipay: bool,
 ) -> Result<BrowserSession, ApiError> {
     let chromium_bin = chromium_binary()?;
     let proxy_bridge = match proxy_url {
@@ -538,6 +593,12 @@ async fn launch_session(
         return Err(error);
     }
 
+    let alipay_selector = auto_select_alipay.then(|| {
+        tokio::spawn(async move {
+            watch_for_alipay_payment_method(cdp_port).await;
+        })
+    });
+
     Ok(BrowserSession {
         id,
         expires_at: now_secs() + SESSION_TTL.as_secs() as i64,
@@ -549,6 +610,7 @@ async fn launch_session(
         chromium,
         x11vnc,
         xvfb,
+        alipay_selector,
         _proxy_bridge: proxy_bridge,
     })
 }
@@ -689,6 +751,130 @@ fn go_subscription_url(workspace_id: &str) -> Result<String, ApiError> {
         .map_err(|_| ApiError::Internal("创建 Go 订阅地址失败".into()))?
         .extend(["workspace", workspace_id, "go"]);
     Ok(url.to_string())
+}
+
+async fn watch_for_alipay_payment_method(port: u16) {
+    let client = match reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(3))
+        .build()
+    {
+        Ok(client) => client,
+        Err(error) => {
+            tracing::debug!("failed to initialize Alipay selector: {error}");
+            return;
+        }
+    };
+    let deadline = Instant::now() + SESSION_TTL;
+    let mut last_error = None;
+
+    while Instant::now() < deadline {
+        match timeout(
+            Duration::from_secs(3),
+            try_select_alipay_payment_method(&client, port),
+        )
+        .await
+        {
+            Ok(Ok(true)) => {
+                tracing::info!("automatically selected Alipay payment method");
+                return;
+            }
+            Ok(Ok(false)) => {}
+            Ok(Err(error)) => last_error = Some(error.to_string()),
+            Err(_) => last_error = Some("Chromium DevTools request timed out".to_string()),
+        }
+        sleep(ALIPAY_SELECTION_INTERVAL).await;
+    }
+
+    if let Some(error) = last_error {
+        tracing::debug!("Alipay selector ended without a click: {error}");
+    }
+}
+
+async fn try_select_alipay_payment_method(
+    client: &reqwest::Client,
+    port: u16,
+) -> Result<bool, ApiError> {
+    let pages: Value = client
+        .get(format!("http://127.0.0.1:{port}/json/list"))
+        .send()
+        .await
+        .map_err(|error| ApiError::ServiceUnavailable(format!("连接 Chromium 失败: {error}")))?
+        .json()
+        .await
+        .map_err(|error| ApiError::Internal(format!("解析 Chromium 页面失败: {error}")))?;
+    let Some(websocket_url) = pages.as_array().and_then(|pages| {
+        pages.iter().find_map(|page| {
+            let is_opencode_page = page.get("type").and_then(Value::as_str) == Some("page")
+                && page
+                    .get("url")
+                    .and_then(Value::as_str)
+                    .is_some_and(|url| url.starts_with("https://opencode.ai/workspace/"));
+            is_opencode_page
+                .then(|| page.get("webSocketDebuggerUrl").and_then(Value::as_str))
+                .flatten()
+        })
+    }) else {
+        return Ok(false);
+    };
+    let mut websocket_url = reqwest::Url::parse(websocket_url)
+        .map_err(|error| ApiError::Internal(format!("Chromium DevTools 地址无效: {error}")))?;
+    websocket_url
+        .set_host(Some("127.0.0.1"))
+        .map_err(|_| ApiError::Internal("Chromium DevTools 地址无效".into()))?;
+    let (mut socket, _) = connect_async(websocket_url.as_str())
+        .await
+        .map_err(|error| {
+            ApiError::ServiceUnavailable(format!("连接 Chromium DevTools 失败: {error}"))
+        })?;
+    socket
+        .send(tokio_tungstenite::tungstenite::Message::Text(
+            json!({
+                "id": 1,
+                "method": "Runtime.evaluate",
+                "params": {
+                    "expression": ALIPAY_CLICK_EXPRESSION,
+                    "returnByValue": true,
+                    "userGesture": true
+                }
+            })
+            .to_string()
+            .into(),
+        ))
+        .await
+        .map_err(|error| ApiError::Internal(format!("选择支付宝失败: {error}")))?;
+
+    while let Some(message) = socket.next().await {
+        let message =
+            message.map_err(|error| ApiError::Internal(format!("选择支付宝失败: {error}")))?;
+        let Some(text) = (match message {
+            tokio_tungstenite::tungstenite::Message::Text(text) => Some(text.to_string()),
+            tokio_tungstenite::tungstenite::Message::Binary(bytes) => {
+                String::from_utf8(bytes.to_vec()).ok()
+            }
+            _ => None,
+        }) else {
+            continue;
+        };
+        let value: Value = serde_json::from_str(&text)?;
+        if value.get("id").and_then(Value::as_i64) != Some(1) {
+            continue;
+        }
+        return alipay_click_result(&value);
+    }
+    Err(ApiError::ServiceUnavailable(
+        "选择支付宝时 Chromium 连接已关闭".into(),
+    ))
+}
+
+fn alipay_click_result(value: &Value) -> Result<bool, ApiError> {
+    if value.get("error").is_some() || value.pointer("/result/exceptionDetails").is_some() {
+        return Err(ApiError::Internal("执行支付宝自动选择失败".into()));
+    }
+    value
+        .pointer("/result/result/value")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| ApiError::Internal("支付宝自动选择响应格式无效".into()))
 }
 
 async fn browser_is_ready(port: u16) -> Result<bool, ApiError> {
@@ -1022,6 +1208,36 @@ mod tests {
             go_subscription_url("wrk_123/a").unwrap(),
             "https://opencode.ai/workspace/wrk_123%2Fa/go"
         );
+    }
+
+    #[test]
+    fn parses_successful_alipay_click_result() {
+        let clicked = json!({
+            "id": 1,
+            "result": {"result": {"type": "boolean", "value": true}}
+        });
+        let waiting = json!({
+            "id": 1,
+            "result": {"result": {"type": "boolean", "value": false}}
+        });
+
+        assert!(alipay_click_result(&clicked).unwrap());
+        assert!(!alipay_click_result(&waiting).unwrap());
+    }
+
+    #[test]
+    fn rejects_failed_or_malformed_alipay_click_result() {
+        let failed = json!({"id": 1, "result": {"exceptionDetails": {}}});
+        let malformed = json!({"id": 1, "result": {"result": {"type": "undefined"}}});
+
+        assert!(matches!(
+            alipay_click_result(&failed),
+            Err(ApiError::Internal(_))
+        ));
+        assert!(matches!(
+            alipay_click_result(&malformed),
+            Err(ApiError::Internal(_))
+        ));
     }
 
     #[test]

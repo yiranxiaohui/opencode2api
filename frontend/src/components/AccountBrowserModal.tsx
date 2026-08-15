@@ -35,7 +35,7 @@ export default function AccountBrowserModal({ accountName, session, onClose }: P
         </div>
         <RemoteBrowserDesktop session={session} />
         <div className="modal-foot remote-browser-foot">
-          <span className="small">已注入该账号 Cookie，并使用账号绑定的出口代理。完成订阅后关闭窗口，再刷新套餐与额度。</span>
+          <span className="small">已注入该账号 Cookie，并使用账号绑定的出口代理；支付方式弹窗出现后会自动打开支付宝。完成订阅后关闭窗口，再刷新套餐与额度。</span>
           <button type="button" className="btn" disabled={closing} onClick={() => void close()}>{closing ? '正在关闭…' : '关闭浏览器'}</button>
         </div>
       </div>
