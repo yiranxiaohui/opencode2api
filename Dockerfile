@@ -22,12 +22,14 @@ RUN apt-get update \
         chromium \
         chromium-sandbox \
         fonts-liberation \
+        fonts-noto-cjk \
         fonts-noto-color-emoji \
         gosu \
         libssl3 \
         x11vnc \
         xvfb \
     && rm -rf /var/lib/apt/lists/* \
+    && fc-list :lang=zh family | grep -q "Noto Sans CJK" \
     && mkdir -p /app/frontend /data
 
 WORKDIR /app
