@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-axum = "0.8"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "time", "signal"] }
+axum = { version = "0.8", features = ["ws"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "time", "signal", "process"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 sea-orm-migration = { version = "1.1", features = ["runtime-tokio-rustls", "sqlx-sqlite"] }
 argon2 = { version = "0.5.3", features = ["rand"] }
@@ -21,6 +21,7 @@ uuid = { version = "1", features = ["v4"] }
 base64 = "0.23"
 sha2 = "0.10"
 futures-util = "0.3"
+tokio-tungstenite = "0.29"
 async-stream = "0.3"
 http-body-util = "0.1"
 tower-http = { version = "0.6", features = ["fs", "trace"] }

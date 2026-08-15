@@ -6,6 +6,9 @@ import type {
   ClientApiKey,
   ClientApiKeyCreated,
   CookieImportInput,
+  BrowserLoginInput,
+  BrowserLoginSession,
+  BrowserLoginStatus,
   AccountUsage,
   ExportPayload,
   ImportResult,
@@ -49,6 +52,13 @@ export const keysApi = {
   importCookie: (input: CookieImportInput) => post<KeyRecord>('/api/keys/import-cookie', input),
   usage: (id: string) => get<AccountUsage>(`/api/keys/${id}/usage`),
   inviteLink: (id: string) => get<InviteLinkResult>(`/api/keys/${id}/invite-link`),
+}
+
+export const browserLoginApi = {
+  start: (input: BrowserLoginInput) => post<BrowserLoginSession>('/api/browser-login', input),
+  status: (id: string) => get<BrowserLoginStatus>(`/api/browser-login/${id}`),
+  capture: (id: string) => post<KeyRecord>(`/api/browser-login/${id}/capture`),
+  stop: (id: string) => del<{ ok: boolean }>(`/api/browser-login/${id}`),
 }
 
 export const proxiesApi = {

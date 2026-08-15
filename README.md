@@ -9,6 +9,7 @@ API Key 使用 **登录密码派生密钥 AES-256-GCM 加密** 后存于 SQLite�
 ## 功能
 
 - **账号管理**：增删改查、搜索、标签筛选、启用/禁用
+- **网页登录导入**：在无桌面的服务器中启动临时 Chromium，通过网页虚拟桌面手动登录并自动读取 Cookie、发现 workspace 与 API Key
 - **连通性测试**：一键请求 OpenCode 官方 `/models`，显示延迟与模型列表并缓存
 - **模型管理**：汇总账号支持的模型，可全局启用或禁用并控制网关访问
 - **统一代理**：`POST /v1/chat/completions` 等，SSE 流式原样透传；使用会话粘性哈希在支持请求模型的账号池中负载均衡，避免连续对话切换账号导致缓存未命中
@@ -48,7 +49,7 @@ cargo build --release
 ## 用法
 
 1. **首次运行**：设置登录密码，创建账号。
-2. **新增账号**：填入名称和 API Key；Base URL 由系统自动处理。
+2. **新增账号**：可填入 API Key，也可点击「网页登录导入」，在服务器的临时 Chromium 中手动登录后自动导入；Base URL 由系统自动处理。
 3. **创建访问密钥**：在「密钥管理」中创建供客户端调用网关的 API Key。
 4. **代理调用**：将兼容客户端指向 `http://127.0.0.1:8787/v1`：
 
@@ -92,6 +93,10 @@ curl http://127.0.0.1:8787/api/keys \
 | `OPENCODE2API_BIND` | `127.0.0.1:8787` | 监听地址 |
 | `OPENCODE2API_DATA_DIR` | `./data` | SQLite 与数据库所在目录 |
 | `OPENCODE2API_WEB_DIST` | `./frontend/dist` | 前端构建产物目录 |
+| `OPENCODE2API_CHROMIUM_BIN` | 自动查找 | Chromium 可执行文件；官方 Docker 镜像使用内置的低权限启动包装器 |
+| `OPENCODE2API_XVFB_BIN` | `Xvfb` | Xvfb 可执行文件 |
+| `OPENCODE2API_X11VNC_BIN` | `x11vnc` | x11vnc 可执行文件 |
+| `OPENCODE2API_CHROMIUM_NO_SANDBOX` | `false` | 为 Chromium 添加 `--no-sandbox`；仅在运行环境无法使用沙箱且已接受安全风险时启用 |
 | `RUST_LOG` | `info` | 日志级别 |
 
 ## API 一览
@@ -104,6 +109,9 @@ curl http://127.0.0.1:8787/api/keys \
 | `GET` | `/api/keys?q=&tag=` | 账号列表（不含 Key） |
 | `GET` | `/api/keys/{id}` | 账号详情（含解密 Key） |
 | `POST`/`PUT`/`DELETE` | `/api/keys[/{id}]` | 增删改 |
+| `GET`/`POST`/`DELETE` | `/api/browser-login[/{id}]` | 查询状态 / 启动 / 结束临时网页登录会话 |
+| `GET` | `/api/browser-login/{id}/vnc` | 登录会话的受保护虚拟桌面 WebSocket |
+| `POST` | `/api/browser-login/{id}/capture` | 读取 OpenCode Cookie、验证并导入账号 |
 | `POST` | `/api/keys/{id}/test` | 连通性测试（`{ok, latency_ms, models}`） |
 | `POST` | `/api/keys/{id}/set-enabled` | 启用或禁用账号 |
 | `GET` | `/api/keys/{id}/usage` | 查询通过 Cookie 导入账号的套餐额度 |
@@ -141,6 +149,8 @@ OpenCode Zen 会根据模型使用不同协议。客户端仍统一连接本服�
   逐个用随机 nonce 加密；加密密钥持久化后由网关使用，不依赖某个网页会话。
 - 持久化的加密密钥与密文保存在同一数据目录，因此该设计用于避免凭据明文落盘，不能抵御整个数据目录被窃取的情况。请使用操作系统权限和磁盘加密保护数据目录。
 - 明文 Key 只短暂存在于进程内存，绝不落盘、不写日志。
+- 网页登录会话同一时间只允许一个，使用独立的临时 Chromium 配置，15 分钟后自动结束；VNC 仅监听容器回环地址，并由已登录的同源管理 WebSocket 转发。
+- 网页登录的 Chromium 默认保留沙箱。不要轻易启用 `OPENCODE2API_CHROMIUM_NO_SANDBOX`；登录窗口从服务器直连，账号绑定代理仅用于 Cookie 验证和后续网关请求。
 
 ## 目录结构
 
@@ -196,12 +206,14 @@ docker run -d \
 ```
 
 服务默认监听 `0.0.0.0:8787`，SQLite 数据保存在 `/data`。
+官方镜像已经包含 Chromium、Xvfb 和 x11vnc，无桌面服务器无需额外安装。直接运行二进制并使用「网页登录导入」时，需要自行安装这三个程序。
 推送 `v*` 版本标签会自动创建 GitHub Release，并发布 amd64/arm64 镜像到 GHCR。
 
 ## 已知限制 / Roadmap
 
 - 导出文件含明文 Key，请妥善保管
 - 请求日志与 Token 用量统计保存在本地；套餐额度查询仅支持通过 Cookie 导入的账号
+- 网页登录窗口从服务器 IP 直连 OpenCode，不使用账号绑定的转发代理
 - 暂无多用户 / 共享访问（设计为单人本地工具）
 
 ## 许可证

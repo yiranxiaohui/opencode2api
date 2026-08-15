@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { setUnauthorizedHandler } from './api/client'
-import type { ClientApiKey, KeyInput, KeySummary, ProxyRecord } from './api/types'
+import type { ClientApiKey, KeyInput, KeyRecord, KeySummary, ProxyRecord } from './api/types'
 import AuthScreen from './components/AuthScreen'
 import ImportExportBar from './components/ImportExportBar'
 import KeyDetail from './components/KeyDetail'
 import CookieImportModal from './components/CookieImportModal'
+import BrowserLoginModal from './components/BrowserLoginModal'
 import KeyFormModal from './components/KeyFormModal'
 import KeyList from './components/KeyList'
 import Logs from './components/Logs'
@@ -30,6 +31,7 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('keys')
   const [formOpen, setFormOpen] = useState(false)
   const [cookieImportOpen, setCookieImportOpen] = useState(false)
+  const [browserLoginOpen, setBrowserLoginOpen] = useState(false)
   const [editing, setEditing] = useState<KeySummary | null>(null)
   const [detail, setDetail] = useState<KeySummary | null>(null)
   const [pendingDelete, setPendingDelete] = useState<KeySummary | null>(null)
@@ -45,6 +47,7 @@ export default function App() {
     setTab('keys')
     setFormOpen(false)
     setCookieImportOpen(false)
+    setBrowserLoginOpen(false)
     setEditing(null)
     setDetail(null)
     setPendingDelete(null)
@@ -137,6 +140,11 @@ export default function App() {
     setPendingProxyDelete(null)
   }
 
+  const handleBrowserImported = (record: KeyRecord) => {
+    void queryClient.invalidateQueries({ queryKey: ['keys'] })
+    toast(`已导入 ${record.name}`, 'ok')
+  }
+
   const renderTab = () => {
     if (tab === 'logs') return <Logs keys={keys} clientKeys={clientKeys} />
     if (tab === 'models') return <ModelList />
@@ -180,6 +188,7 @@ export default function App() {
           </div>
           <div className="grow" />
           <ImportExportBar onImport={(items) => importItems.mutate(items)} />
+          <button className="btn" onClick={() => setBrowserLoginOpen(true)}>网页登录导入</button>
           <button className="btn" onClick={() => setCookieImportOpen(true)}>Cookie 导入</button>
           <button
             className="btn btn-primary"
@@ -279,6 +288,7 @@ export default function App() {
         />
       )}
       {cookieImportOpen && <CookieImportModal proxies={proxies} busy={busy} onClose={() => setCookieImportOpen(false)} onSave={(input) => { setBusy(true); importCookie.mutate(input, { onSettled: () => setBusy(false), onSuccess: () => setCookieImportOpen(false) }) }} />}
+      {browserLoginOpen && <BrowserLoginModal proxies={proxies} onClose={() => setBrowserLoginOpen(false)} onImported={handleBrowserImported} />}
 
       {proxyFormOpen && (
         <ProxyFormModal

@@ -6,6 +6,9 @@ use crate::state::AppState;
 
 pub mod admin_tokens;
 pub mod auth;
+pub mod browser_login {
+    pub use crate::browser_login::{capture, start, status, stop, vnc};
+}
 pub mod client_keys;
 pub mod import_export;
 pub mod keys;
@@ -50,6 +53,13 @@ pub fn build_router(state: AppState) -> Router {
         .route("/chat/{*path}", any(proxy::chat_proxy))
         .route("/keys", get(keys::list).post(keys::create))
         .route("/keys/import-cookie", post(keys::import_cookie))
+        .route("/browser-login", post(browser_login::start))
+        .route(
+            "/browser-login/{id}",
+            get(browser_login::status).delete(browser_login::stop),
+        )
+        .route("/browser-login/{id}/capture", post(browser_login::capture))
+        .route("/browser-login/{id}/vnc", get(browser_login::vnc))
         .route(
             "/keys/{id}",
             get(keys::get_key).put(keys::update).delete(keys::delete),

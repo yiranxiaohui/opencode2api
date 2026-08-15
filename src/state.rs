@@ -28,6 +28,8 @@ pub struct AppState {
     /// Account ids currently in quota-exhaustion cooldown, mapped to the Unix
     /// second at which the cooldown expires. In-memory only; cleared on restart.
     pub cooldowns: Arc<Mutex<HashMap<String, i64>>>,
+    /// One short-lived virtual Chromium session used for interactive Cookie import.
+    pub browser_login: crate::browser_login::BrowserLoginManager,
     pub web_dist: PathBuf,
 }
 
@@ -55,6 +57,7 @@ impl AppState {
             test_client,
             proxy_pool_clients: Arc::new(Mutex::new(HashMap::new())),
             cooldowns: Arc::new(Mutex::new(HashMap::new())),
+            browser_login: crate::browser_login::BrowserLoginManager::new(),
             web_dist,
         })
     }

@@ -192,8 +192,16 @@ pub async fn import_cookie(
     _: ManagementAuth,
     Json(input): Json<CookieImportInput>,
 ) -> Result<(StatusCode, Json<KeyRecord>), ApiError> {
+    let record = import_cookie_record(&st, input).await?;
+    Ok((StatusCode::CREATED, Json(record)))
+}
+
+pub(crate) async fn import_cookie_record(
+    st: &AppState,
+    input: CookieImportInput,
+) -> Result<KeyRecord, ApiError> {
     let cookie = crate::opencode_account::normalize_cookie(&input.cookie)?;
-    let proxy_id = resolve_proxy(&st, input.proxy_id.as_deref()).await?;
+    let proxy_id = resolve_proxy(st, input.proxy_id.as_deref()).await?;
     let client = st.client_for_proxy_id(proxy_id.as_deref()).await?;
     let (workspace_id, api_key, email) =
         crate::opencode_account::discover(&client, &cookie).await?;
@@ -225,14 +233,11 @@ pub async fn import_cookie(
         now_secs(),
     )?;
     let row = st.db.get_key(&id)?.unwrap();
-    Ok((
-        StatusCode::CREATED,
-        Json(KeyRecord {
-            summary: summary(&st, &row),
-            api_key,
-            model_cache: vec![],
-        }),
-    ))
+    Ok(KeyRecord {
+        summary: summary(st, &row),
+        api_key,
+        model_cache: vec![],
+    })
 }
 
 fn summary(st: &AppState, row: &crate::db::KeyRow) -> KeySummary {

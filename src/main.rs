@@ -2,6 +2,7 @@ use std::net::SocketAddr;
 
 use tracing_subscriber::EnvFilter;
 
+mod browser_login;
 mod config;
 mod crypto;
 mod db;
