@@ -7,7 +7,7 @@ use crate::state::AppState;
 pub mod admin_tokens;
 pub mod auth;
 pub mod browser_login {
-    pub use crate::browser_login::{capture, start, status, stop, vnc};
+    pub use crate::browser_login::{capture, start, start_go, status, stop, vnc};
 }
 pub mod client_keys;
 pub mod import_export;
@@ -65,6 +65,7 @@ pub fn build_router(state: AppState) -> Router {
             get(keys::get_key).put(keys::update).delete(keys::delete),
         )
         .route("/keys/{id}/test", post(keys::test))
+        .route("/keys/{id}/browser/go", post(browser_login::start_go))
         .route("/keys/{id}/usage", get(keys::usage))
         .route("/keys/{id}/invite-link", get(keys::get_invite_link))
         .route("/keys/{id}/invite-rewards", get(keys::invite_rewards))

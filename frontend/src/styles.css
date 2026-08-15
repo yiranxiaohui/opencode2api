@@ -401,6 +401,7 @@ select.input { appearance: none; }
   border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); font-size: 11.5px;
 }
 .remote-browser-help span { display: inline-flex; align-items: center; gap: 7px; }
+.remote-browser-help-actions { display: flex; align-items: center; gap: 10px; }
 .remote-browser-help i { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 7px rgba(217, 164, 65, .5); }
 .remote-browser-help i.connected { background: var(--ok); box-shadow: 0 0 7px rgba(92, 184, 132, .6); }
 .remote-browser-screen {
@@ -415,7 +416,7 @@ select.input { appearance: none; }
 .remote-browser-clipboard textarea { min-height: 58px; max-height: 150px; resize: vertical; font-family: var(--mono); }
 .remote-browser-clipboard-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .remote-browser-clipboard-actions > .small { margin-right: auto; }
-.remote-browser-clipboard-notice { color: var(--ok); }
+.remote-browser-clipboard-notice { flex: none; margin: 0; padding: 8px 16px; color: var(--ok); background: var(--panel); border-top: 1px solid var(--border); }
 .remote-browser-error { flex: none; margin: 10px 16px 0; }
 .remote-browser-foot { flex: none; align-items: center; padding-top: 14px; }
 .remote-browser-foot > .small { margin-right: auto; }
@@ -424,6 +425,7 @@ select.input { appearance: none; }
   .remote-browser-overlay { padding: 0; }
   .remote-browser-modal { width: 100%; height: 100dvh; border-radius: 0; }
   .remote-browser-help { align-items: flex-start; flex-direction: column; gap: 3px; }
+  .remote-browser-help-actions { width: 100%; justify-content: space-between; }
   .remote-browser-clipboard-actions { flex-wrap: wrap; }
   .remote-browser-clipboard-actions > .small { width: 100%; }
   .remote-browser-foot { flex-wrap: wrap; }

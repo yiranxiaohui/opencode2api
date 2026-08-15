@@ -59,7 +59,7 @@ pub struct BrowserLoginManager {
 struct BrowserSession {
     id: String,
     expires_at: i64,
-    input: BrowserLoginInput,
+    input: Option<BrowserLoginInput>,
     proxy_revision: Option<String>,
     vnc_addr: SocketAddr,
     cdp_port: u16,
@@ -106,12 +106,34 @@ impl BrowserLoginManager {
         proxy_url: Option<Zeroizing<String>>,
         proxy_revision: Option<String>,
     ) -> Result<BrowserLoginStarted, ApiError> {
+        self.start_session(Some(input), LOGIN_URL, None, proxy_url, proxy_revision)
+            .await
+    }
+
+    pub async fn start_account_page(
+        &self,
+        target_url: String,
+        cookie: Zeroizing<String>,
+        proxy_url: Option<Zeroizing<String>>,
+    ) -> Result<BrowserLoginStarted, ApiError> {
+        self.start_session(None, &target_url, Some(&cookie), proxy_url, None)
+            .await
+    }
+
+    async fn start_session(
+        &self,
+        input: Option<BrowserLoginInput>,
+        target_url: &str,
+        cookie: Option<&str>,
+        proxy_url: Option<Zeroizing<String>>,
+        proxy_revision: Option<String>,
+    ) -> Result<BrowserLoginStarted, ApiError> {
         let mut slot = self.session.lock().await;
         if let Some(current) = slot.as_mut()
             && current.is_running()?
         {
             return Err(ApiError::Conflict(
-                "已有网页登录会话正在进行，请先完成或关闭该窗口".into(),
+                "已有远程浏览器会话正在进行，请先完成或关闭该窗口".into(),
             ));
         }
         if let Some(stale) = slot.take() {
@@ -120,6 +142,8 @@ impl BrowserLoginManager {
 
         let session = launch_session(
             input,
+            target_url,
+            cookie,
             proxy_url.as_ref().map(|url| url.as_str()),
             proxy_revision,
         )
@@ -149,12 +173,12 @@ impl BrowserLoginManager {
         let session = slot
             .as_mut()
             .filter(|session| session.id == id)
-            .ok_or_else(|| ApiError::NotFound("网页登录会话不存在或已结束".into()))?;
+            .ok_or_else(|| ApiError::NotFound("远程浏览器会话不存在或已结束".into()))?;
         if !session.is_running()? {
             let stale = slot.take().unwrap();
             drop(slot);
             stale.stop().await;
-            return Err(ApiError::NotFound("网页登录会话已结束".into()));
+            return Err(ApiError::NotFound("远程浏览器会话已结束".into()));
         }
         f(session)
     }
@@ -171,7 +195,9 @@ impl BrowserLoginManager {
             .with_session(id, |session| {
                 Ok((
                     session.cdp_port,
-                    session.input.clone(),
+                    session.input.clone().ok_or_else(|| {
+                        ApiError::BadRequest("该远程浏览器会话不支持导入 Cookie".into())
+                    })?,
                     session.proxy_revision.clone(),
                 ))
             })
@@ -259,6 +285,40 @@ pub async fn capture(
     Ok((axum::http::StatusCode::CREATED, Json(record)))
 }
 
+pub async fn start_go(
+    State(st): State<AppState>,
+    _: ManagementAuth,
+    AxumPath(id): AxumPath<String>,
+) -> Result<Json<BrowserLoginStarted>, ApiError> {
+    let account = st
+        .db
+        .get_key(&id)?
+        .ok_or_else(|| ApiError::NotFound("account not found".into()))?;
+    let cookie_enc = account.cookie_enc.as_deref().ok_or_else(|| {
+        ApiError::BadRequest("该账号没有 Cookie，请先通过网页登录导入账号".into())
+    })?;
+    let workspace_id = account
+        .workspace_id
+        .as_deref()
+        .ok_or_else(|| ApiError::BadRequest("该账号缺少 workspace，无法打开 Go 订阅页面".into()))?;
+    let cookie = st.decrypt_secret(cookie_enc).await?;
+    let proxy_url = if let Some(proxy_id) = account.proxy_id.as_deref() {
+        let proxy = st
+            .db
+            .get_proxy(proxy_id)?
+            .ok_or_else(|| ApiError::BadRequest("账号绑定代理不存在，请先编辑账号".into()))?;
+        Some(st.decrypt_secret(&proxy.url_enc).await?)
+    } else {
+        None
+    };
+    let target_url = go_subscription_url(workspace_id)?;
+    Ok(Json(
+        st.browser_login
+            .start_account_page(target_url, cookie, proxy_url)
+            .await?,
+    ))
+}
+
 pub async fn status(
     State(st): State<AppState>,
     _: ManagementAuth,
@@ -328,7 +388,9 @@ async fn proxy_vnc(socket: WebSocket, addr: SocketAddr) -> Result<(), ApiError> 
 }
 
 async fn launch_session(
-    input: BrowserLoginInput,
+    input: Option<BrowserLoginInput>,
+    target_url: &str,
+    cookie: Option<&str>,
     proxy_url: Option<&str>,
     proxy_revision: Option<String>,
 ) -> Result<BrowserSession, ApiError> {
@@ -422,7 +484,11 @@ async fn launch_session(
             "--remote-debugging-address=127.0.0.1".into(),
             format!("--remote-debugging-port={cdp_port}"),
         ])
-        .arg(LOGIN_URL)
+        .arg(if cookie.is_some() {
+            "about:blank"
+        } else {
+            target_url
+        })
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -448,6 +514,23 @@ async fn launch_session(
         }
     };
     if let Err(error) = wait_for_cdp(cdp_port, &mut chromium).await {
+        let _ = chromium.kill().await;
+        let _ = x11vnc.kill().await;
+        let _ = xvfb.kill().await;
+        let _ = std::fs::remove_dir_all(&profile_dir);
+        return Err(error);
+    }
+    let account_page = if let Some(cookie) = cookie {
+        timeout(
+            Duration::from_secs(5),
+            cdp_open_authenticated_page(cdp_port, cookie, target_url),
+        )
+        .await
+        .map_err(|_| ApiError::ServiceUnavailable("初始化账号浏览器超时".into()))?
+    } else {
+        Ok(())
+    };
+    if let Err(error) = account_page {
         let _ = chromium.kill().await;
         let _ = x11vnc.kill().await;
         let _ = xvfb.kill().await;
@@ -596,6 +679,18 @@ fn dependency_error(name: &str, env_name: &str, error: std::io::Error) -> ApiErr
     ))
 }
 
+fn go_subscription_url(workspace_id: &str) -> Result<String, ApiError> {
+    if workspace_id.is_empty() || workspace_id.chars().any(char::is_control) {
+        return Err(ApiError::BadRequest("workspace 格式无效".into()));
+    }
+    let mut url = reqwest::Url::parse("https://opencode.ai")
+        .map_err(|error| ApiError::Internal(format!("创建 Go 订阅地址失败: {error}")))?;
+    url.path_segments_mut()
+        .map_err(|_| ApiError::Internal("创建 Go 订阅地址失败".into()))?
+        .extend(["workspace", workspace_id, "go"]);
+    Ok(url.to_string())
+}
+
 async fn browser_is_ready(port: u16) -> Result<bool, ApiError> {
     let pages: Value = reqwest::Client::builder()
         .no_proxy()
@@ -622,6 +717,147 @@ async fn browser_is_ready(port: u16) -> Result<bool, ApiError> {
 
 fn is_authenticated_page(url: &str) -> bool {
     url.starts_with("https://opencode.ai/workspace/")
+}
+
+async fn cdp_open_authenticated_page(
+    port: u16,
+    cookie_header: &str,
+    target_url: &str,
+) -> Result<(), ApiError> {
+    let pages: Value = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .map_err(|error| ApiError::Internal(format!("创建 Chromium 客户端失败: {error}")))?
+        .get(format!("http://127.0.0.1:{port}/json/list"))
+        .send()
+        .await
+        .map_err(|error| ApiError::ServiceUnavailable(format!("连接 Chromium 失败: {error}")))?
+        .json()
+        .await
+        .map_err(|error| ApiError::Internal(format!("解析 Chromium 页面失败: {error}")))?;
+    let websocket_url = pages
+        .as_array()
+        .and_then(|pages| {
+            pages.iter().find(|page| {
+                page.get("type").and_then(Value::as_str) == Some("page")
+                    && page.get("webSocketDebuggerUrl").is_some()
+            })
+        })
+        .and_then(|page| page.get("webSocketDebuggerUrl"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| ApiError::Internal("Chromium 未返回页面 DevTools 地址".into()))?;
+    let mut websocket_url = reqwest::Url::parse(websocket_url)
+        .map_err(|error| ApiError::Internal(format!("Chromium DevTools 地址无效: {error}")))?;
+    websocket_url
+        .set_host(Some("127.0.0.1"))
+        .map_err(|_| ApiError::Internal("Chromium DevTools 地址无效".into()))?;
+    let (mut socket, _) = connect_async(websocket_url.as_str())
+        .await
+        .map_err(|error| {
+            ApiError::ServiceUnavailable(format!("连接 Chromium DevTools 失败: {error}"))
+        })?;
+
+    socket
+        .send(tokio_tungstenite::tungstenite::Message::Text(
+            json!({
+                "id": 1,
+                "method": "Network.setCookies",
+                "params": {"cookies": cookie_params(cookie_header)?}
+            })
+            .to_string()
+            .into(),
+        ))
+        .await
+        .map_err(|error| ApiError::Internal(format!("写入 Chromium Cookie 失败: {error}")))?;
+    wait_for_cdp_response(&mut socket, 1, "写入 Chromium Cookie").await?;
+
+    socket
+        .send(tokio_tungstenite::tungstenite::Message::Text(
+            json!({"id": 2, "method": "Page.navigate", "params": {"url": target_url}})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .map_err(|error| ApiError::Internal(format!("打开 Go 订阅页面失败: {error}")))?;
+    wait_for_cdp_response(&mut socket, 2, "打开 Go 订阅页面").await
+}
+
+async fn wait_for_cdp_response<S>(
+    socket: &mut tokio_tungstenite::WebSocketStream<S>,
+    id: i64,
+    action: &str,
+) -> Result<(), ApiError>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    while let Some(message) = socket.next().await {
+        let message =
+            message.map_err(|error| ApiError::Internal(format!("{action}失败: {error}")))?;
+        let Some(text) = (match message {
+            tokio_tungstenite::tungstenite::Message::Text(text) => Some(text.to_string()),
+            tokio_tungstenite::tungstenite::Message::Binary(bytes) => {
+                String::from_utf8(bytes.to_vec()).ok()
+            }
+            _ => None,
+        }) else {
+            continue;
+        };
+        let value: Value = serde_json::from_str(&text)?;
+        if value.get("id").and_then(Value::as_i64) != Some(id) {
+            continue;
+        }
+        if let Some(error) = value.get("error") {
+            return Err(ApiError::Internal(format!("{action}失败: {error}")));
+        }
+        return Ok(());
+    }
+    Err(ApiError::ServiceUnavailable(format!("{action}连接已关闭")))
+}
+
+fn cookie_params(cookie_header: &str) -> Result<Vec<Value>, ApiError> {
+    let mut cookies = Vec::new();
+    for part in cookie_header.split(';') {
+        let (name, value) = part.trim().split_once('=').ok_or_else(|| {
+            ApiError::BadRequest("账号 Cookie 格式无效，请重新网页登录导入".into())
+        })?;
+        let name = name.trim();
+        let value = value.trim();
+        if name.is_empty()
+            || name.chars().any(char::is_control)
+            || value.chars().any(char::is_control)
+        {
+            return Err(ApiError::BadRequest(
+                "账号 Cookie 格式无效，请重新网页登录导入".into(),
+            ));
+        }
+        let cookie = if name.starts_with("__Host-") {
+            json!({
+                "name": name,
+                "value": value,
+                "url": "https://opencode.ai/",
+                "path": "/",
+                "secure": true,
+                "httpOnly": true
+            })
+        } else {
+            json!({
+                "name": name,
+                "value": value,
+                "domain": ".opencode.ai",
+                "path": "/",
+                "secure": true,
+                "httpOnly": true
+            })
+        };
+        cookies.push(cookie);
+    }
+    if cookies.is_empty() {
+        return Err(ApiError::BadRequest(
+            "账号 Cookie 为空，请重新网页登录导入".into(),
+        ));
+    }
+    Ok(cookies)
 }
 
 async fn cdp_cookie_header(port: u16) -> Result<String, ApiError> {
@@ -777,6 +1013,36 @@ mod tests {
         assert!(!is_authenticated_page("https://opencode.ai/auth"));
         assert!(!is_authenticated_page(
             "https://example.com/workspace/wrk_123"
+        ));
+    }
+
+    #[test]
+    fn builds_go_subscription_url_with_encoded_workspace() {
+        assert_eq!(
+            go_subscription_url("wrk_123/a").unwrap(),
+            "https://opencode.ai/workspace/wrk_123%2Fa/go"
+        );
+    }
+
+    #[test]
+    fn converts_cookie_header_to_secure_cdp_cookie_params() {
+        let cookies = cookie_params("session=abc==; __Host-auth=secret").unwrap();
+        assert_eq!(cookies.len(), 2);
+        assert_eq!(cookies[0]["name"], "session");
+        assert_eq!(cookies[0]["value"], "abc==");
+        assert_eq!(cookies[0]["domain"], ".opencode.ai");
+        assert_eq!(cookies[0]["secure"], true);
+        assert_eq!(cookies[0]["httpOnly"], true);
+        assert_eq!(cookies[1]["name"], "__Host-auth");
+        assert_eq!(cookies[1]["url"], "https://opencode.ai/");
+        assert!(cookies[1].get("domain").is_none());
+    }
+
+    #[test]
+    fn rejects_invalid_cookie_header_for_account_browser() {
+        assert!(matches!(
+            cookie_params("missing-value-separator"),
+            Err(ApiError::BadRequest(_))
         ));
     }
 }

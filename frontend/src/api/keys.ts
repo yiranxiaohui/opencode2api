@@ -57,6 +57,7 @@ export const keysApi = {
   inviteRewards: (id: string) => get<InviteRewardsResult>(`/api/keys/${id}/invite-rewards`),
   claimInviteReward: (id: string, rewardId: string) =>
     post<InviteRewardClaimResult>(`/api/keys/${id}/invite-rewards/${encodeURIComponent(rewardId)}/claim`),
+  startGoBrowser: (id: string) => post<BrowserLoginSession>(`/api/keys/${id}/browser/go`),
 }
 
 export const browserLoginApi = {

@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { keysApi } from '../api/keys'
-import type { AccountUsage, KeySummary, TestResult } from '../api/types'
+import type { AccountUsage, BrowserLoginSession, KeySummary, TestResult } from '../api/types'
 import { keysQueryKey } from '../hooks/useKeys'
 import { toast } from '../lib/toast'
 import CopyButton from './CopyButton'
+import AccountBrowserModal from './AccountBrowserModal'
 import { BoltIcon, CheckIcon, EditIcon, EyeIcon, EyeOffIcon, PowerIcon, RefreshIcon, TrashIcon, XIcon } from './icons'
 
 interface Props {
@@ -24,6 +25,8 @@ export default function KeyDetail({ summary, onClose, onEdit, onDelete, onSetEna
   const [usage, setUsage] = useState<AccountUsage | null>(summary.usage_cache)
   const [usageLoading, setUsageLoading] = useState(false)
   const [accountType, setAccountType] = useState(summary.account_type)
+  const [goStarting, setGoStarting] = useState(false)
+  const [goSession, setGoSession] = useState<BrowserLoginSession | null>(null)
   const queryClient = useQueryClient()
 
   useEffect(() => {
@@ -83,8 +86,20 @@ export default function KeyDetail({ summary, onClose, onEdit, onDelete, onSetEna
   }
   const money = (value: number | null) => value == null ? '—' : `$${(value / 100_000_000).toFixed(2)}`
 
+  const startGoBrowser = async () => {
+    setGoStarting(true)
+    try {
+      setGoSession(await keysApi.startGoBrowser(summary.id))
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '启动订阅浏览器失败', 'err')
+    } finally {
+      setGoStarting(false)
+    }
+  }
+
   return (
-    <div className="overlay" onClick={onClose}>
+    <>
+      <div className="overlay" onClick={onClose}>
       <div className="drawer" onClick={(e) => e.stopPropagation()}>
         <div className="drawer-head">
           <h2>{summary.name}</h2>
@@ -189,10 +204,10 @@ export default function KeyDetail({ summary, onClose, onEdit, onDelete, onSetEna
 
           <div className="section-label">操作</div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {accountType === 'normal' && (
-              <a className="btn btn-primary" title="在 OpenCode 官方页面选择可用付款方式" href={summary.workspace_id ? `https://opencode.ai/workspace/${encodeURIComponent(summary.workspace_id)}/go` : 'https://opencode.ai/auth'} target="_blank" rel="noreferrer">
-                订阅 Go
-              </a>
+            {accountType === 'normal' && summary.has_cookie && (
+              <button className="btn btn-primary" title="使用该账号 Cookie 和绑定代理在服务器浏览器中订阅" disabled={goStarting} onClick={() => void startGoBrowser()}>
+                {goStarting ? '正在启动…' : '订阅 Go'}
+              </button>
             )}
             <button className={summary.is_enabled ? 'btn' : 'btn btn-enable'} onClick={() => onSetEnabled(summary.id, !summary.is_enabled)}>
               <PowerIcon size={13} /> {summary.is_enabled ? '禁用账号' : '启用账号'}
@@ -210,6 +225,8 @@ export default function KeyDetail({ summary, onClose, onEdit, onDelete, onSetEna
           </div>
         </div>
       </div>
-    </div>
+      </div>
+      {goSession && <AccountBrowserModal accountName={summary.name} session={goSession} onClose={() => setGoSession(null)} />}
+    </>
   )
 }

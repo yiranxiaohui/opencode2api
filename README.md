@@ -10,6 +10,7 @@ API Key 使用 **登录密码派生密钥 AES-256-GCM 加密** 后存于 SQLite�
 
 - **账号管理**：增删改查、搜索、标签筛选、启用/禁用
 - **网页登录导入**：在无桌面的服务器中启动临时 Chromium，通过网页虚拟桌面手动登录并自动读取 Cookie、发现 workspace 与 API Key；支持把本机文本粘贴到远程浏览器，并可让登录与账号使用绑定同一个代理出口
+- **服务器订阅 Go**：为 Cookie 账号启动同一套临时 Chromium，注入已有登录 Cookie，并通过账号绑定代理打开 workspace 的 Go 订阅页
 - **连通性测试**：一键请求 OpenCode 官方 `/models`，显示延迟与模型列表并缓存
 - **模型管理**：汇总账号支持的模型，可全局启用或禁用并控制网关访问
 - **统一代理**：`POST /v1/chat/completions` 等，SSE 流式原样透传；使用会话粘性哈希在支持请求模型的账号池中负载均衡，避免连续对话切换账号导致缓存未命中
@@ -114,6 +115,7 @@ curl http://127.0.0.1:8787/api/keys \
 | `GET`/`POST`/`DELETE` | `/api/browser-login[/{id}]` | 查询状态 / 启动 / 结束临时网页登录会话 |
 | `GET` | `/api/browser-login/{id}/vnc` | 登录会话的受保护虚拟桌面 WebSocket |
 | `POST` | `/api/browser-login/{id}/capture` | 读取 OpenCode Cookie、验证并导入账号 |
+| `POST` | `/api/keys/{id}/browser/go` | 使用账号 Cookie 与绑定代理启动 Go 订阅浏览器 |
 | `POST` | `/api/keys/{id}/test` | 连通性测试（`{ok, latency_ms, models}`） |
 | `POST` | `/api/keys/{id}/set-enabled` | 启用或禁用账号 |
 | `GET` | `/api/keys/{id}/usage` | 查询通过 Cookie 导入账号的套餐额度 |
@@ -154,6 +156,7 @@ OpenCode Zen 会根据模型使用不同协议。客户端仍统一连接本服�
 - 持久化的加密密钥与密文保存在同一数据目录，因此该设计用于避免凭据明文落盘，不能抵御整个数据目录被窃取的情况。请使用操作系统权限和磁盘加密保护数据目录。
 - 明文 Key 只短暂存在于进程内存，绝不落盘、不写日志。
 - 网页登录会话同一时间只允许一个，使用独立的临时 Chromium 配置，15 分钟后自动结束；VNC 仅监听容器回环地址，并由已登录的同源管理 WebSocket 转发。
+- Cookie 账号的 Go 订阅入口也使用临时 Chromium；Cookie 仅在进程内注入临时配置，关闭或超时后随配置目录销毁。
 - 网页登录的 Chromium 默认保留沙箱。不要轻易启用 `OPENCODE2API_CHROMIUM_NO_SANDBOX`；选择代理后，临时回环代理桥会让 Chromium、Cookie 验证和后续网关请求使用同一个 HTTP、HTTPS、SOCKS5 或 SOCKS5H 出口，并支持代理用户名密码。
 
 ## 目录结构

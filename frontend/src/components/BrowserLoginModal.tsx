@@ -1,8 +1,8 @@
-import RFB from '@novnc/novnc'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { browserLoginApi } from '../api/keys'
 import type { BrowserLoginSession, KeyRecord, ProxyRecord } from '../api/types'
 import { XIcon } from './icons'
+import RemoteBrowserDesktop from './RemoteBrowserDesktop'
 
 interface Props {
   proxies: ProxyRecord[]
@@ -19,14 +19,10 @@ export default function BrowserLoginModal({ proxies, onClose, onImported }: Prop
   const [capturing, setCapturing] = useState(false)
   const [closing, setClosing] = useState(false)
   const [connected, setConnected] = useState(false)
-  const [clipboardOpen, setClipboardOpen] = useState(false)
-  const [clipboardNotice, setClipboardNotice] = useState('')
   const [error, setError] = useState('')
   const closedRef = useRef(false)
   const capturingRef = useRef(false)
   const automaticAttemptedRef = useRef(false)
-  const remoteRfbRef = useRef<RFB | null>(null)
-  const clipboardInputRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     const id = session?.id
@@ -60,8 +56,6 @@ export default function BrowserLoginModal({ proxies, onClose, onImported }: Prop
       }
       automaticAttemptedRef.current = false
       setConnected(false)
-      setClipboardOpen(false)
-      setClipboardNotice('')
       setSession(next)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '启动登录窗口失败')
@@ -114,45 +108,6 @@ export default function BrowserLoginModal({ proxies, onClose, onImported }: Prop
     }
   }, [capture, connected, session])
 
-  const handleConnected = useCallback(() => setConnected(true), [])
-  const handleDisconnected = useCallback((message?: string) => {
-    setConnected(false)
-    if (message) setError(message)
-  }, [])
-
-  const handleRfbChange = useCallback((rfb: RFB | null) => {
-    remoteRfbRef.current = rfb
-  }, [])
-
-  const closeClipboard = () => {
-    if (clipboardInputRef.current) clipboardInputRef.current.value = ''
-    setClipboardOpen(false)
-  }
-
-  const sendClipboard = () => {
-    const rfb = remoteRfbRef.current
-    const text = clipboardInputRef.current?.value ?? ''
-    if (!rfb || !connected) {
-      setError('远程浏览器尚未连接，暂时无法发送剪贴板')
-      return
-    }
-    if (!text) {
-      setError('请先把本机内容粘贴到文本框')
-      clipboardInputRef.current?.focus()
-      return
-    }
-    try {
-      rfb.clipboardPasteFrom(text)
-      if (clipboardInputRef.current) clipboardInputRef.current.value = ''
-      setClipboardOpen(false)
-      setClipboardNotice('已发送到远程剪贴板；请点击远程输入框后按 Ctrl+V')
-      setError('')
-      rfb.focus()
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '发送远程剪贴板失败')
-    }
-  }
-
   return (
     <div className="modal-overlay remote-browser-overlay">
       <div className={`modal ${session ? 'remote-browser-modal' : ''}`}>
@@ -182,38 +137,10 @@ export default function BrowserLoginModal({ proxies, onClose, onImported }: Prop
           </form>
         ) : (
           <>
-            <div className="remote-browser-help">
-              <span><i className={connected ? 'connected' : ''} />{connected ? '远程浏览器已连接' : '正在连接远程浏览器…'}</span>
-              <span>会话将在 {new Date(session.expires_at * 1000).toLocaleTimeString()} 过期</span>
-            </div>
-            <RemoteBrowser sessionId={session.id} onConnected={handleConnected} onDisconnected={handleDisconnected} onRfbChange={handleRfbChange} />
-            {clipboardOpen && (
-              <div className="remote-browser-clipboard">
-                <textarea
-                  ref={clipboardInputRef}
-                  className="input"
-                  rows={2}
-                  autoFocus
-                  aria-label="要发送到远程浏览器的文本"
-                  placeholder="在这里粘贴本机文本（内容只会发送到当前远程浏览器）"
-                  onKeyDown={(event) => {
-                    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
-                      event.preventDefault()
-                      sendClipboard()
-                    }
-                  }}
-                />
-                <div className="remote-browser-clipboard-actions">
-                  <span className="small">粘贴后发送，再回到远程输入框按 Ctrl+V；Ctrl/⌘+Enter 可直接发送。</span>
-                  <button type="button" className="btn btn-sm" onClick={closeClipboard}>取消</button>
-                  <button type="button" className="btn btn-primary btn-sm" onClick={sendClipboard}>发送到远程剪贴板</button>
-                </div>
-              </div>
-            )}
+            <RemoteBrowserDesktop session={session} onConnectionChange={setConnected} />
             {error && <p className="browser-login-error remote-browser-error" role="alert">{error}</p>}
             <div className="modal-foot remote-browser-foot">
-              <span className={`small ${clipboardNotice ? 'remote-browser-clipboard-notice' : ''}`}>{clipboardNotice || '进入 workspace 后会自动导入；按钮可用于手动重试。密码和 Cookie 不会显示在管理页面中。'}</span>
-              <button type="button" className="btn" disabled={!connected || capturing || closing} onClick={() => { setClipboardNotice(''); setClipboardOpen((open) => !open) }}>{clipboardOpen ? '收起粘贴框' : '粘贴本机文本'}</button>
+              <span className="small">进入 workspace 后会自动导入；按钮可用于手动重试。密码和 Cookie 不会显示在管理页面中。</span>
               <button type="button" className="btn" disabled={capturing || closing} onClick={() => void close()}>{closing ? '正在关闭…' : '取消'}</button>
               <button type="button" className="btn btn-primary" disabled={!connected || capturing || closing} onClick={() => void capture()}>{capturing ? '正在验证并导入…' : '立即读取并导入'}</button>
             </div>
@@ -222,42 +149,4 @@ export default function BrowserLoginModal({ proxies, onClose, onImported }: Prop
       </div>
     </div>
   )
-}
-
-function RemoteBrowser({ sessionId, onConnected, onDisconnected, onRfbChange }: { sessionId: string; onConnected: () => void; onDisconnected: (message?: string) => void; onRfbChange: (rfb: RFB | null) => void }) {
-  const targetRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    const target = targetRef.current
-    if (!target) return
-    let disposed = false
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const url = `${protocol}//${window.location.host}/api/browser-login/${encodeURIComponent(sessionId)}/vnc`
-    const rfb = new RFB(target, url)
-    onRfbChange(rfb)
-    rfb.scaleViewport = true
-    rfb.resizeSession = false
-    rfb.clipViewport = false
-    rfb.focusOnClick = true
-    rfb.qualityLevel = 7
-    rfb.compressionLevel = 5
-    rfb.addEventListener('connect', () => {
-      if (!disposed) onConnected()
-    })
-    rfb.addEventListener('disconnect', (event) => {
-      if (!disposed) onDisconnected(event.detail.clean ? undefined : '远程浏览器连接已断开，请关闭窗口后重试')
-    })
-    rfb.addEventListener('securityfailure', (event) => {
-      if (!disposed) onDisconnected(event.detail.reason || '远程浏览器安全协商失败')
-    })
-    rfb.focus()
-    return () => {
-      disposed = true
-      onRfbChange(null)
-      rfb.disconnect()
-      target.replaceChildren()
-    }
-  }, [sessionId, onConnected, onDisconnected, onRfbChange])
-
-  return <div className="remote-browser-screen" ref={targetRef} />
 }
