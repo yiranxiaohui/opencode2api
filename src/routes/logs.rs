@@ -271,16 +271,21 @@ pub fn capture_usage_stream<S>(
 where
     S: Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static,
 {
-    let mut stream = Box::pin(stream);
-    let mut buffer = String::new();
-    let mut finalizer = StreamLogFinalizer {
-        st,
-        log_id,
-        started,
-        usage: None,
-        first_token_ms: None,
-    };
     async_stream::stream! {
+        // Keep the guard inside the generator so it owns the database handle
+        // and log id until the response body completes or is dropped. If the
+        // guard is created outside this block, Rust's precise closure capture
+        // can retain only the fields referenced below and drop the guard before
+        // the stream is polled, losing the final database update.
+        let mut finalizer = StreamLogFinalizer {
+            st,
+            log_id,
+            started,
+            usage: None,
+            first_token_ms: None,
+        };
+        let mut stream = Box::pin(stream);
+        let mut buffer = String::new();
         while let Some(chunk) = stream.next().await {
             match chunk {
                 Ok(bytes) => {
@@ -294,7 +299,7 @@ where
                         {
                             if finalizer.first_token_ms.is_none() && has_output_delta(&value) {
                                 finalizer.first_token_ms =
-                                    Some(started.elapsed().as_millis() as i64);
+                                    Some(finalizer.started.elapsed().as_millis() as i64);
                             }
                             if let Some(u) = usage_from_json(&value) {
                                 finalizer.usage = Some(
@@ -327,7 +332,7 @@ struct StreamLogFinalizer {
 impl Drop for StreamLogFinalizer {
     fn drop(&mut self) {
         let usage = self.usage.unwrap_or_default();
-        let _ = self.st.db.finalize_stream_log(
+        if let Err(error) = self.st.db.finalize_stream_log(
             &self.log_id,
             self.first_token_ms,
             self.started.elapsed().as_millis() as i64,
@@ -335,7 +340,9 @@ impl Drop for StreamLogFinalizer {
             usage.completion,
             usage.cached,
             usage.cache_creation,
-        );
+        ) {
+            tracing::error!(log_id = %self.log_id, "failed to finalize stream log: {error}");
+        }
     }
 }
 
@@ -357,8 +364,59 @@ fn has_output_delta(value: &Value) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
+    use futures_util::stream;
     use serde_json::json;
+
+    async fn stream_log_state(log_id: &str) -> (AppState, std::path::PathBuf) {
+        let path =
+            std::env::temp_dir().join(format!("opencode2api-stream-log-{}.db", Uuid::new_v4()));
+        crate::migration::run(&path).await.unwrap();
+        let state = AppState::new(&path, PathBuf::from("frontend/dist")).unwrap();
+        state
+            .db
+            .insert_request_log(&RequestLogRow {
+                id: log_id.into(),
+                created_at: now_secs(),
+                client_key_id: None,
+                client_key_name: "test".into(),
+                route_key_id: None,
+                route_key_name: None,
+                method: "POST".into(),
+                path: "chat/completions".into(),
+                model: Some("deepseek-v4-pro".into()),
+                stream: true,
+                status: 200,
+                latency_ms: -1,
+                first_token_ms: None,
+                prompt_tokens: None,
+                completion_tokens: None,
+                cached_tokens: None,
+                cache_creation_tokens: None,
+                error: None,
+            })
+            .unwrap();
+        (state, path)
+    }
+
+    fn only_log(state: &AppState) -> RequestLogRow {
+        let (logs, _) = state
+            .db
+            .list_request_logs(&LogFilter {
+                limit: 1,
+                ..LogFilter::default()
+            })
+            .unwrap();
+        logs.into_iter().next().unwrap()
+    }
+
+    fn remove_test_database(path: &std::path::Path) {
+        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_file(path.with_extension("db-shm"));
+        let _ = std::fs::remove_file(path.with_extension("db-wal"));
+    }
 
     #[test]
     fn extracts_cache_usage_from_all_supported_protocols() {
@@ -403,5 +461,78 @@ mod tests {
     fn reasoning_delta_counts_as_first_output() {
         let delta = json!({"choices":[{"delta":{"reasoning_content":"thinking"}}]});
         assert!(has_output_delta(&delta));
+    }
+
+    #[tokio::test]
+    async fn streaming_capture_finalizes_timing_and_usage() {
+        let log_id = "completed-stream";
+        let (state, path) = stream_log_state(log_id).await;
+        let chunks = stream::iter([
+            Ok::<_, reqwest::Error>(Bytes::from_static(
+                br#"data: {"choices":[{"delta":{"reasoning_content":"thinking"}}]}
+
+"#,
+            )),
+            Ok(Bytes::from_static(
+                br#"data: {"choices":[],"usage":{"prompt_tokens":100,"completion_tokens":20,"prompt_cache_hit_tokens":75}}
+
+data: [DONE]
+
+"#,
+            )),
+        ]);
+
+        let mut captured = Box::pin(capture_usage_stream(
+            chunks,
+            state.clone(),
+            log_id.into(),
+            Instant::now(),
+        ));
+        while let Some(chunk) = captured.next().await {
+            chunk.unwrap();
+        }
+        drop(captured);
+
+        let log = only_log(&state);
+        assert_ne!(log.latency_ms, -1);
+        assert!(log.first_token_ms.is_some());
+        assert_eq!(log.prompt_tokens, Some(100));
+        assert_eq!(log.completion_tokens, Some(20));
+        assert_eq!(log.cached_tokens, Some(75));
+
+        drop(state);
+        remove_test_database(&path);
+    }
+
+    #[tokio::test]
+    async fn streaming_capture_finalizes_when_consumer_drops() {
+        let log_id = "cancelled-stream";
+        let (state, path) = stream_log_state(log_id).await;
+        let chunks = stream::iter([
+            Ok::<_, reqwest::Error>(Bytes::from_static(
+                br#"data: {"choices":[{"delta":{"content":"hello"}}],"usage":{"prompt_tokens":12,"completion_tokens":1}}
+
+"#,
+            )),
+            Ok(Bytes::from_static(b"data: [DONE]\n\n")),
+        ]);
+
+        let mut captured = Box::pin(capture_usage_stream(
+            chunks,
+            state.clone(),
+            log_id.into(),
+            Instant::now(),
+        ));
+        captured.next().await.unwrap().unwrap();
+        drop(captured);
+
+        let log = only_log(&state);
+        assert_ne!(log.latency_ms, -1);
+        assert!(log.first_token_ms.is_some());
+        assert_eq!(log.prompt_tokens, Some(12));
+        assert_eq!(log.completion_tokens, Some(1));
+
+        drop(state);
+        remove_test_database(&path);
     }
 }
