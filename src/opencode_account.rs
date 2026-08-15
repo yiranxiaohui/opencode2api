@@ -579,7 +579,7 @@ fn parse_invite_rewards(body: &str) -> Vec<InviteReward> {
         rewards.push(InviteReward {
             id,
             source: object_string(object, "source").unwrap_or_else(|| "unknown".into()),
-            claimable: status.eq_ignore_ascii_case("pending"),
+            claimable: is_claimable_reward_status(&status),
             status,
             email: object_string(object, "email").unwrap_or_default(),
             amount_cents: object_integer(object, "amount").unwrap_or(0),
@@ -588,6 +588,10 @@ fn parse_invite_rewards(body: &str) -> Vec<InviteReward> {
     }
 
     rewards
+}
+
+fn is_claimable_reward_status(status: &str) -> bool {
+    status.eq_ignore_ascii_case("available") || status.eq_ignore_ascii_case("pending")
 }
 
 fn object_string(body: &str, field: &str) -> Option<String> {
@@ -756,11 +760,20 @@ mod tests {
 
     #[test]
     fn parses_referral_rewards_with_dates_and_claimability() {
-        let body = r#"rewards:[{status:"pending",email:"friend@example.com",amount:500,id:"ref_pending-1",source:"inviter",createdAt:"2026-08-12T10:00:00.000Z"},{id:'ref_used_2',source:'invitee',status:'applied',email:'owner@example.com',amount:'500',timeCreated:1786500000000}]"#;
+        let body = r#"rewards:[{status:"available",email:"new@example.com",amount:500,id:"ref_available-1",source:"inviter"},{status:"pending",email:"friend@example.com",amount:500,id:"ref_pending-1",source:"inviter",createdAt:"2026-08-12T10:00:00.000Z"},{id:'ref_used_2',source:'invitee',status:'applied',email:'owner@example.com',amount:'500',timeCreated:1786500000000}]"#;
 
         assert_eq!(
             parse_invite_rewards(body),
             vec![
+                InviteReward {
+                    id: "ref_available-1".into(),
+                    source: "inviter".into(),
+                    status: "available".into(),
+                    email: "new@example.com".into(),
+                    amount_cents: 500,
+                    created_at: None,
+                    claimable: true,
+                },
                 InviteReward {
                     id: "ref_pending-1".into(),
                     source: "inviter".into(),
