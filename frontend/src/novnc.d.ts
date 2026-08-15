@@ -14,6 +14,7 @@ declare module '@novnc/novnc' {
     qualityLevel: number
     compressionLevel: number
     addEventListener<K extends keyof RFBEventMap>(type: K, listener: (event: RFBEventMap[K]) => void): void
+    clipboardPasteFrom(text: string): void
     disconnect(): void
     focus(): void
   }
