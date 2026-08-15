@@ -116,6 +116,8 @@ curl http://127.0.0.1:8787/api/keys \
 | `POST` | `/api/keys/{id}/set-enabled` | 启用或禁用账号 |
 | `GET` | `/api/keys/{id}/usage` | 查询通过 Cookie 导入账号的套餐额度 |
 | `GET` | `/api/keys/{id}/invite-link` | 获取单个 Cookie 账号的邀请链接 |
+| `GET` | `/api/keys/{id}/invite-rewards` | 查询单个 Cookie 账号的邀请奖励列表 |
+| `POST` | `/api/keys/{id}/invite-rewards/{reward_id}/claim` | 使用一条待领取的邀请奖励 |
 | `GET` | `/api/models` | 获取模型管理列表及启用状态 |
 | `POST` | `/api/models/set-enabled` | 全局启用或禁用指定模型 |
 | `GET`/`POST`/`DELETE` | `/api/client-keys[/{id}]` | 管理客户端访问密钥 |

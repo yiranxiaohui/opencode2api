@@ -4,7 +4,8 @@ import { keysApi } from '../api/keys'
 import type { KeySummary } from '../api/types'
 import { keysQueryKey } from '../hooks/useKeys'
 import { copyWithToast, toast } from '../lib/toast'
-import { BoltIcon, CopyIcon, EditIcon, PowerIcon, RefreshIcon, SearchIcon, TrashIcon } from './icons'
+import { BoltIcon, CopyIcon, EditIcon, GiftIcon, PowerIcon, RefreshIcon, SearchIcon, TrashIcon } from './icons'
+import InviteRewardsModal from './InviteRewardsModal'
 
 interface Props {
   keys: KeySummary[]
@@ -33,6 +34,7 @@ export default function KeyList({ keys, selectedId, onOpen, onTest, onEdit, onDe
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000))
   const [queryingIds, setQueryingIds] = useState<Set<string>>(() => new Set())
   const [inviteId, setInviteId] = useState<string | null>(null)
+  const [rewardAccount, setRewardAccount] = useState<KeySummary | null>(null)
   const queryClient = useQueryClient()
 
   useEffect(() => {
@@ -218,6 +220,9 @@ export default function KeyList({ keys, selectedId, onOpen, onTest, onEdit, onDe
               {k.has_cookie && <button className="btn btn-sm" disabled={inviteId === k.id} title="复制邀请链接" onClick={() => void copyInviteLink(k)}>
                 <CopyIcon size={13} />
               </button>}
+              {k.has_cookie && <button className="btn btn-sm" title="查看邀请奖励" onClick={() => setRewardAccount(k)}>
+                <GiftIcon size={13} />
+              </button>}
               <button className="btn btn-sm" title="连通性测试" onClick={() => onTest(k)}>
                 <BoltIcon size={13} />
               </button>
@@ -240,6 +245,7 @@ export default function KeyList({ keys, selectedId, onOpen, onTest, onEdit, onDe
           )
         })}
       </div>
+      {rewardAccount && <InviteRewardsModal account={rewardAccount} onClose={() => setRewardAccount(null)} />}
     </>
   )
 }

@@ -10,8 +10,9 @@ use crate::db::KeyData;
 use crate::error::ApiError;
 use crate::middleware::ManagementAuth;
 use crate::models::{
-    AccountUsage, CookieImportInput, InviteLinkResult, KeyEnabledInput, KeyInput, KeyRecord,
-    KeySummary, ModelInfo, OPENCODE_BASE_URL, OkResponse, TestResult, now_secs,
+    AccountUsage, CookieImportInput, InviteLinkResult, InviteRewardClaimResult,
+    InviteRewardsResult, KeyEnabledInput, KeyInput, KeyRecord, KeySummary, ModelInfo,
+    OPENCODE_BASE_URL, OkResponse, TestResult, now_secs,
 };
 use crate::state::AppState;
 
@@ -298,6 +299,61 @@ pub async fn get_invite_link(
         account_id: row.id,
         account_name: row.name,
         invite_link,
+    }))
+}
+
+pub async fn invite_rewards(
+    State(st): State<AppState>,
+    _: ManagementAuth,
+    Path(id): Path<String>,
+) -> Result<Json<InviteRewardsResult>, ApiError> {
+    let row = st
+        .db
+        .get_key(&id)?
+        .ok_or_else(|| ApiError::NotFound("key not found".into()))?;
+    let cookie_enc = row.cookie_enc.as_deref().ok_or_else(|| {
+        ApiError::BadRequest("该账号不是通过 Cookie 导入，无法查询邀请奖励".into())
+    })?;
+    let workspace = row
+        .workspace_id
+        .as_deref()
+        .ok_or_else(|| ApiError::Internal("账号缺少 workspace".into()))?;
+    let cookie = st.decrypt_secret(cookie_enc).await?;
+    let client = st.client_for_key(&row).await?;
+    let rewards = crate::opencode_account::invite_rewards(&client, &cookie, workspace).await?;
+    Ok(Json(InviteRewardsResult {
+        account_id: row.id,
+        account_name: row.name,
+        rewards,
+    }))
+}
+
+pub async fn claim_invite_reward(
+    State(st): State<AppState>,
+    _: ManagementAuth,
+    Path((id, reward_id)): Path<(String, String)>,
+) -> Result<Json<InviteRewardClaimResult>, ApiError> {
+    let row = st
+        .db
+        .get_key(&id)?
+        .ok_or_else(|| ApiError::NotFound("key not found".into()))?;
+    let cookie_enc = row.cookie_enc.as_deref().ok_or_else(|| {
+        ApiError::BadRequest("该账号不是通过 Cookie 导入，无法领取邀请奖励".into())
+    })?;
+    let workspace = row
+        .workspace_id
+        .as_deref()
+        .ok_or_else(|| ApiError::Internal("账号缺少 workspace".into()))?;
+    let cookie = st.decrypt_secret(cookie_enc).await?;
+    let client = st.client_for_key(&row).await?;
+    let amount_cents =
+        crate::opencode_account::claim_invite_reward(&client, &cookie, workspace, &reward_id)
+            .await?;
+    Ok(Json(InviteRewardClaimResult {
+        account_id: row.id,
+        account_name: row.name,
+        reward_id,
+        amount_cents,
     }))
 }
 

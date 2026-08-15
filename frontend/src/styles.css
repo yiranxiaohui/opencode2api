@@ -196,7 +196,7 @@ select.input { appearance: none; }
 
 .key-row {
   display: grid;
-  grid-template-columns: 14px minmax(0, 1.2fr) minmax(0, 1.4fr) minmax(0, 10rem) 5.5rem 9.5rem;
+  grid-template-columns: 14px minmax(0, 1.2fr) minmax(0, 1.4fr) minmax(0, 10rem) 5.5rem 11.75rem;
   align-items: center;
   gap: 14px;
   padding: 13px 18px;
@@ -418,6 +418,37 @@ select.input { appearance: none; }
   .remote-browser-help { align-items: flex-start; flex-direction: column; gap: 3px; }
   .remote-browser-foot { flex-wrap: wrap; }
   .remote-browser-foot > .small { width: 100%; }
+}
+
+/* ---------- Invite rewards ---------- */
+
+.invite-reward-modal { width: min(760px, 100%); }
+.invite-reward-heading { flex: 1; min-width: 0; }
+.invite-reward-heading h3 { display: flex; align-items: center; gap: 8px; }
+.invite-reward-heading h3 svg { color: var(--accent); }
+.invite-reward-heading > span { display: block; color: var(--faint); font-size: 11.5px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.invite-reward-summary { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 12px; margin-bottom: 14px; }
+.invite-reward-summary > span { flex: 1; }
+.invite-reward-summary strong { color: var(--text); font-weight: 500; white-space: nowrap; }
+.invite-reward-loading, .invite-reward-empty { min-height: 150px; display: flex; align-items: center; justify-content: center; gap: 9px; color: var(--faint); text-align: center; }
+.invite-reward-error { min-height: 120px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.invite-reward-error .auth-err { margin-bottom: 10px; }
+.invite-reward-table { border: 1px solid var(--border); border-radius: var(--radius-sm); overflow-x: auto; }
+.invite-reward-row { min-width: 650px; display: grid; grid-template-columns: 82px minmax(220px, 1fr) 125px 120px; align-items: center; gap: 14px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+.invite-reward-row:last-child { border-bottom: 0; }
+.invite-reward-row:not(.invite-reward-table-head):hover { background: var(--panel-2); }
+.invite-reward-table-head { min-height: 36px; padding-block: 8px; color: var(--faint); background: var(--bg-2); font-size: 11px; font-weight: 600; letter-spacing: .05em; }
+.invite-reward-amount { color: var(--accent); font: 600 14px var(--mono); }
+.invite-reward-description { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.invite-reward-date { color: var(--faint); font-size: 12px; white-space: nowrap; }
+.invite-reward-action { display: flex; justify-content: flex-end; }
+.invite-reward-status { display: inline-flex; align-items: center; justify-content: center; min-width: 86px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 4px 8px; color: var(--muted); font-size: 11.5px; }
+.invite-reward-status.applied { color: var(--faint); background: var(--panel-2); }
+
+@media (max-width: 680px) {
+  .invite-reward-summary { align-items: flex-start; flex-wrap: wrap; }
+  .invite-reward-summary > span { flex-basis: 100%; }
+  .invite-reward-summary strong { flex: 1; }
 }
 
 /* ---------- Auth screens ---------- */

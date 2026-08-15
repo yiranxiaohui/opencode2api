@@ -189,6 +189,13 @@ export const StarIcon = ({ size, style, className }: IconProps) => (
   </svg>
 )
 
+export const GiftIcon = ({ size, style, className }: IconProps) => (
+  <svg {...base({ size, style, className })}>
+    <rect x="3" y="9" width="18" height="12" rx="2" />
+    <path d="M12 9v12M3 13h18M5 9V6.5A1.5 1.5 0 0 1 6.5 5H9c1.7 0 3 1.3 3 3v1M19 9V6.5A1.5 1.5 0 0 0 17.5 5H15c-1.7 0-3 1.3-3 3v1" />
+  </svg>
+)
+
 export const GlobeIcon = ({ size, style, className }: IconProps) => (
   <svg {...base({ size, style, className })}>
     <circle cx="12" cy="12" r="9" />

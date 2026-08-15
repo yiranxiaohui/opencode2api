@@ -189,6 +189,32 @@ pub struct InviteLinkResult {
     pub invite_link: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct InviteReward {
+    pub id: String,
+    pub source: String,
+    pub status: String,
+    pub email: String,
+    pub amount_cents: i64,
+    pub created_at: Option<String>,
+    pub claimable: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct InviteRewardsResult {
+    pub account_id: String,
+    pub account_name: String,
+    pub rewards: Vec<InviteReward>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct InviteRewardClaimResult {
+    pub account_id: String,
+    pub account_name: String,
+    pub reward_id: String,
+    pub amount_cents: i64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyExport {
     pub name: String,

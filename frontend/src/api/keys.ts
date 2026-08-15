@@ -13,6 +13,8 @@ import type {
   ExportPayload,
   ImportResult,
   InviteLinkResult,
+  InviteRewardClaimResult,
+  InviteRewardsResult,
   KeyInput,
   KeyRecord,
   KeySummary,
@@ -52,6 +54,9 @@ export const keysApi = {
   importCookie: (input: CookieImportInput) => post<KeyRecord>('/api/keys/import-cookie', input),
   usage: (id: string) => get<AccountUsage>(`/api/keys/${id}/usage`),
   inviteLink: (id: string) => get<InviteLinkResult>(`/api/keys/${id}/invite-link`),
+  inviteRewards: (id: string) => get<InviteRewardsResult>(`/api/keys/${id}/invite-rewards`),
+  claimInviteReward: (id: string, rewardId: string) =>
+    post<InviteRewardClaimResult>(`/api/keys/${id}/invite-rewards/${encodeURIComponent(rewardId)}/claim`),
 }
 
 export const browserLoginApi = {

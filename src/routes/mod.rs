@@ -67,6 +67,11 @@ pub fn build_router(state: AppState) -> Router {
         .route("/keys/{id}/test", post(keys::test))
         .route("/keys/{id}/usage", get(keys::usage))
         .route("/keys/{id}/invite-link", get(keys::get_invite_link))
+        .route("/keys/{id}/invite-rewards", get(keys::invite_rewards))
+        .route(
+            "/keys/{id}/invite-rewards/{reward_id}/claim",
+            post(keys::claim_invite_reward),
+        )
         .route("/keys/{id}/set-enabled", post(keys::set_enabled))
         .route("/proxies", get(proxies::list).post(proxies::create))
         .route(

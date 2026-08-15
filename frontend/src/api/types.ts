@@ -72,6 +72,29 @@ export interface InviteLinkResult {
   invite_link: string
 }
 
+export interface InviteReward {
+  id: string
+  source: string
+  status: string
+  email: string
+  amount_cents: number
+  created_at: string | null
+  claimable: boolean
+}
+
+export interface InviteRewardsResult {
+  account_id: string
+  account_name: string
+  rewards: InviteReward[]
+}
+
+export interface InviteRewardClaimResult {
+  account_id: string
+  account_name: string
+  reward_id: string
+  amount_cents: number
+}
+
 export interface ExportItem {
   name: string
   base_url?: string
