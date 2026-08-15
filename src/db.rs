@@ -8,14 +8,14 @@ use crate::models::{
     AccountType, AccountUsage, LogStatsGroup, LogStatsTotals, ModelInfo, now_secs,
 };
 
-const COLUMNS: &str = "id, name, base_url, api_key_enc, tags, notes, model_cache, is_default, created_at, updated_at, proxy_id, is_enabled, cookie_enc, workspace_id, account_type";
+const COLUMNS: &str = "id, name, base_url, api_key_enc, tags, notes, model_cache, is_default, created_at, updated_at, proxy_id, is_enabled, cookie_enc, workspace_id, account_type, quota_exhausted_at";
 
 /// Qualify every `api_keys` column for queries that LEFT JOIN `proxies`
 /// (`id`, `name`, `created_at`, `updated_at` exist in both tables).
 const KEY_SELECT: &str = "api_keys.id, api_keys.name, api_keys.base_url, api_keys.api_key_enc, api_keys.tags, \
      api_keys.notes, api_keys.model_cache, api_keys.is_default, api_keys.created_at, \
      api_keys.updated_at, api_keys.proxy_id, api_keys.is_enabled, api_keys.cookie_enc, api_keys.workspace_id, \
-     api_keys.usage_cache, api_keys.account_type";
+     api_keys.usage_cache, api_keys.account_type, api_keys.quota_exhausted_at";
 
 /// Fields that can be written for a key. `api_key_enc` is the already-encrypted blob.
 #[derive(Debug, Clone)]
@@ -53,6 +53,9 @@ pub struct KeyRow {
     pub cookie_enc: Option<String>,
     pub workspace_id: Option<String>,
     pub usage_cache: Option<AccountUsage>,
+    /// Set after an upstream quota failure and cleared only by an internal
+    /// quota refresh that confirms capacity is available again.
+    pub quota_exhausted_at: Option<i64>,
 }
 
 /// Fields that can be written for a proxy. `url_enc` is the already-encrypted URL.
@@ -149,7 +152,8 @@ fn row_to_key(r: &rusqlite::Row) -> rusqlite::Result<KeyRow> {
         cookie_enc: r.get(12)?,
         workspace_id: r.get(13)?,
         usage_cache: usage_json.and_then(|value| serde_json::from_str(&value).ok()),
-        proxy_name: r.get(16)?,
+        quota_exhausted_at: r.get(16)?,
+        proxy_name: r.get(17)?,
     })
 }
 
@@ -547,7 +551,7 @@ impl Db {
         }
         tx.execute(
             &format!(
-                "INSERT INTO api_keys ({COLUMNS}) VALUES (?1,?2,?3,?4,?5,?6,'[]',?7,?8,?8,?9,?10,?11,?12,?13)"
+                "INSERT INTO api_keys ({COLUMNS}) VALUES (?1,?2,?3,?4,?5,?6,'[]',?7,?8,?8,?9,?10,?11,?12,?13,NULL)"
             ),
             params![
                 id,
@@ -724,6 +728,24 @@ impl Db {
             "UPDATE api_keys SET usage_cache = ?1 WHERE id = ?2",
             params![serde_json::to_string(usage)?, id],
         )?;
+        Ok(())
+    }
+
+    pub fn set_quota_exhausted(&self, id: &str, exhausted: bool, now: i64) -> Result<(), ApiError> {
+        let conn = self.0.lock().unwrap();
+        if exhausted {
+            conn.execute(
+                "UPDATE api_keys
+                 SET quota_exhausted_at = COALESCE(quota_exhausted_at, ?2), updated_at = ?2
+                 WHERE id = ?1",
+                params![id, now],
+            )?;
+        } else {
+            conn.execute(
+                "UPDATE api_keys SET quota_exhausted_at = NULL, updated_at = ?2 WHERE id = ?1",
+                params![id, now],
+            )?;
+        }
         Ok(())
     }
 
@@ -1027,4 +1049,53 @@ fn log_group_stats(
     })?;
     let groups = rows.collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(groups)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Db, KeyData};
+    use crate::models::AccountType;
+
+    #[tokio::test]
+    async fn quota_exhausted_state_survives_database_reopen() {
+        let path = std::env::temp_dir().join(format!(
+            "opencode2api-quota-state-{}.db",
+            uuid::Uuid::new_v4()
+        ));
+        crate::migration::run(&path).await.unwrap();
+        let db = Db::open(&path).unwrap();
+        db.insert_key(
+            "account",
+            &KeyData {
+                name: "Account".into(),
+                base_url: "https://example.com".into(),
+                api_key_enc: "encrypted".into(),
+                tags: vec![],
+                notes: String::new(),
+                is_default: false,
+                is_enabled: true,
+                account_type: AccountType::Normal,
+                proxy_id: None,
+                cookie_enc: None,
+                workspace_id: None,
+            },
+            1,
+        )
+        .unwrap();
+        db.set_quota_exhausted("account", true, 123).unwrap();
+        drop(db);
+
+        let db = Db::open(&path).unwrap();
+        assert_eq!(
+            db.get_key("account").unwrap().unwrap().quota_exhausted_at,
+            Some(123)
+        );
+        db.set_quota_exhausted("account", false, 456).unwrap();
+        assert_eq!(
+            db.get_key("account").unwrap().unwrap().quota_exhausted_at,
+            None
+        );
+        drop(db);
+        std::fs::remove_file(path).unwrap();
+    }
 }

@@ -25,9 +25,6 @@ pub struct AppState {
     /// path. reqwest requires the proxy to be set at client-build time, so we
     /// build once per URL and reuse. Purged on proxy create/update/delete.
     pub proxy_pool_clients: Arc<Mutex<HashMap<String, Client>>>,
-    /// Account ids currently in quota-exhaustion cooldown, mapped to the Unix
-    /// second at which the cooldown expires. In-memory only; cleared on restart.
-    pub cooldowns: Arc<Mutex<HashMap<String, i64>>>,
     /// One short-lived virtual Chromium session used for interactive Cookie import.
     pub browser_login: crate::browser_login::BrowserLoginManager,
     pub web_dist: PathBuf,
@@ -56,7 +53,6 @@ impl AppState {
             proxy_client,
             test_client,
             proxy_pool_clients: Arc::new(Mutex::new(HashMap::new())),
-            cooldowns: Arc::new(Mutex::new(HashMap::new())),
             browser_login: crate::browser_login::BrowserLoginManager::new(),
             web_dist,
         })
@@ -105,38 +101,6 @@ impl AppState {
         self.proxy_pool_clients.lock().unwrap().clear();
     }
 
-    /// Mark an account as quota-exhausted for the cooldown window. Concurrent
-    /// marks keep the longest remaining window (monotonic, idempotent).
-    pub fn begin_cooldown(&self, id: &str) {
-        let mut map = self.cooldowns.lock().unwrap();
-        let until = crate::models::now_secs() + crate::routes::proxy::QUOTA_COOLDOWN_SECS;
-        let entry = map.entry(id.to_string()).or_insert(until);
-        *entry = (*entry).max(until);
-    }
-
-    /// True while `id` is inside its cooldown window at time `now` (Unix secs).
-    pub fn in_quota_cooldown(&self, id: &str, now: i64) -> bool {
-        self.cooldowns
-            .lock()
-            .unwrap()
-            .get(id)
-            .is_some_and(|until| now < *until)
-    }
-
-    /// Return the cooldown deadline when it is still active. Expired entries
-    /// are removed opportunistically so the in-memory map stays bounded.
-    pub fn quota_cooldown_until(&self, id: &str, now: i64) -> Option<i64> {
-        let mut map = self.cooldowns.lock().unwrap();
-        match map.get(id).copied() {
-            Some(until) if now < until => Some(until),
-            Some(_) => {
-                map.remove(id);
-                None
-            }
-            None => None,
-        }
-    }
-
     pub async fn decrypt_secret(&self, enc: &str) -> Result<Zeroizing<String>, ApiError> {
         let guard = self.master_key.read().await;
         let key = guard.as_ref().ok_or_else(|| {
@@ -173,28 +137,4 @@ pub fn build_proxy_client(url: &str, timeout: Duration) -> Result<Client, ApiErr
         .timeout(timeout)
         .build()
         .map_err(|e| ApiError::Internal(format!("proxy client: {e}")))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn quota_cooldown_marks_and_expires() {
-        let path = std::env::temp_dir().join(format!("oc2a-state-{}.db", uuid::Uuid::new_v4()));
-        crate::migration::run(&path).await.unwrap();
-        let st = AppState::new(&path, PathBuf::from("frontend/dist")).unwrap();
-        let now = crate::models::now_secs();
-        assert!(!st.in_quota_cooldown("a", now));
-        st.begin_cooldown("a");
-        assert!(st.in_quota_cooldown("a", now));
-        assert!(st.quota_cooldown_until("a", now).is_some());
-        assert!(!st.in_quota_cooldown("a", now + crate::routes::proxy::QUOTA_COOLDOWN_SECS + 1));
-        assert_eq!(
-            st.quota_cooldown_until("a", now + crate::routes::proxy::QUOTA_COOLDOWN_SECS + 1),
-            None
-        );
-        assert!(!st.in_quota_cooldown("b", now));
-        let _ = std::fs::remove_file(path);
-    }
 }

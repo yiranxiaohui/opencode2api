@@ -2,6 +2,7 @@ use std::net::SocketAddr;
 
 use tracing_subscriber::EnvFilter;
 
+mod account_monitor;
 mod browser_login;
 mod config;
 mod crypto;
@@ -26,6 +27,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db_path = cfg.data_dir.join("opencode2api.db");
     migration::run(&db_path).await?;
     let state = state::AppState::new(&db_path, cfg.web_dist.clone())?;
+    account_monitor::spawn(state.clone());
 
     let addr: SocketAddr = cfg.bind.parse()?;
     let listener = tokio::net::TcpListener::bind(addr).await?;

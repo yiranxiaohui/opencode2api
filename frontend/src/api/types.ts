@@ -22,7 +22,7 @@ export interface KeySummary {
   notes: string
   is_enabled: boolean
   account_type: 'normal' | 'go'
-  cooldown_until: number | null
+  quota_exhausted_at: number | null
   model_count: number
   created_at: number
   updated_at: number

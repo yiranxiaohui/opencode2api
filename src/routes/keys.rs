@@ -37,7 +37,7 @@ pub async fn list(
         .db
         .list_keys()?
         .into_iter()
-        .map(|r| summary(&st, &r))
+        .map(|r| summary(&r))
         .collect();
 
     if let Some(q) = params.q.filter(|s| !s.trim().is_empty()) {
@@ -61,7 +61,7 @@ pub async fn get_key(
         .ok_or_else(|| ApiError::NotFound("key not found".into()))?;
     let api_key = st.decrypt_secret(&row.api_key_enc).await?;
     Ok(Json(KeyRecord {
-        summary: summary(&st, &row),
+        summary: summary(&row),
         api_key: api_key.to_string(),
         model_cache: row.model_cache,
     }))
@@ -123,7 +123,7 @@ pub async fn create(
     Ok((
         StatusCode::CREATED,
         Json(KeyRecord {
-            summary: summary(&st, &row),
+            summary: summary(&row),
             api_key: decrypted.to_string(),
             model_cache: row.model_cache,
         }),
@@ -152,6 +152,10 @@ pub async fn update(
         }
     }
 
+    let api_key_replaced = input
+        .api_key
+        .as_deref()
+        .is_some_and(|key| !key.trim().is_empty());
     let enc = match &input.api_key {
         Some(k) if !k.trim().is_empty() => st.encrypt_secret(k).await?,
         _ => existing.api_key_enc.clone(),
@@ -178,11 +182,14 @@ pub async fn update(
         },
         now_secs(),
     )?;
+    if api_key_replaced {
+        st.db.set_quota_exhausted(&id, false, now_secs())?;
+    }
 
     let row = st.db.get_key(&id)?.unwrap();
     let decrypted = st.decrypt_secret(&row.api_key_enc).await?;
     Ok(Json(KeyRecord {
-        summary: summary(&st, &row),
+        summary: summary(&row),
         api_key: decrypted.to_string(),
         model_cache: row.model_cache,
     }))
@@ -235,16 +242,14 @@ pub(crate) async fn import_cookie_record(
     )?;
     let row = st.db.get_key(&id)?.unwrap();
     Ok(KeyRecord {
-        summary: summary(st, &row),
+        summary: summary(&row),
         api_key,
         model_cache: vec![],
     })
 }
 
-fn summary(st: &AppState, row: &crate::db::KeyRow) -> KeySummary {
-    let mut value = KeySummary::from_row(row);
-    value.cooldown_until = st.quota_cooldown_until(&row.id, now_secs());
-    value
+fn summary(row: &crate::db::KeyRow) -> KeySummary {
+    KeySummary::from_row(row)
 }
 
 pub async fn usage(
@@ -256,23 +261,7 @@ pub async fn usage(
         .db
         .get_key(&id)?
         .ok_or_else(|| ApiError::NotFound("key not found".into()))?;
-    let cookie_enc = row.cookie_enc.as_deref().ok_or_else(|| {
-        ApiError::BadRequest("该账号不是通过 Cookie 导入，无法查询套餐额度".into())
-    })?;
-    let workspace = row
-        .workspace_id
-        .as_deref()
-        .ok_or_else(|| ApiError::Internal("账号缺少 workspace".into()))?;
-    let cookie = st.decrypt_secret(cookie_enc).await?;
-    let client = st.client_for_key(&row).await?;
-    let usage = crate::opencode_account::usage(&client, &cookie, workspace).await?;
-    st.db.set_usage_cache(&id, &usage)?;
-    let account_type = if usage.plan_name.eq_ignore_ascii_case("OpenCode Go") {
-        crate::models::AccountType::Go
-    } else {
-        crate::models::AccountType::Normal
-    };
-    st.db.set_account_type(&id, account_type, now_secs())?;
+    let usage = crate::account_monitor::refresh_account_usage(&st, &row).await?;
     Ok(Json(usage))
 }
 

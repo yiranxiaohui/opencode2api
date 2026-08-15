@@ -136,7 +136,12 @@ async fn messages_inner(
         if !status.is_success() {
             let body = upstream.text().await.unwrap_or_default();
             if super::proxy::is_quota_error(status, body.as_bytes()) {
-                st.begin_cooldown(&row.id);
+                if let Err(error) =
+                    st.db
+                        .set_quota_exhausted(&row.id, true, crate::models::now_secs())
+                {
+                    tracing::error!(account_id = %row.id, "failed to persist quota-exhausted state: {error}");
+                }
                 let _ = logs::insert_log(
                     &st,
                     &LogInput {
@@ -152,7 +157,7 @@ async fn messages_inner(
                         completion_tokens: None,
                         cached_tokens: None,
                         cache_creation_tokens: None,
-                        error: Some("额度耗尽，切换至备用账号".into()),
+                        error: Some("额度耗尽，已停止该账号路由并切换至备用账号".into()),
                     },
                 );
                 last_quota_error = Some((status, body));

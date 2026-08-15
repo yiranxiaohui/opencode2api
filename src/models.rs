@@ -56,8 +56,8 @@ pub struct KeySummary {
     pub notes: String,
     pub is_enabled: bool,
     pub account_type: AccountType,
-    /// Unix timestamp at which quota routing cooldown ends, if currently active.
-    pub cooldown_until: Option<i64>,
+    /// Unix timestamp when routing was stopped after a confirmed quota failure.
+    pub quota_exhausted_at: Option<i64>,
     pub model_count: usize,
     pub created_at: i64,
     pub updated_at: i64,
@@ -78,7 +78,7 @@ impl KeySummary {
             notes: r.notes.clone(),
             is_enabled: r.is_enabled,
             account_type: r.account_type,
-            cooldown_until: None,
+            quota_exhausted_at: r.quota_exhausted_at,
             model_count: r.model_cache.len(),
             created_at: r.created_at,
             updated_at: r.updated_at,
@@ -180,6 +180,75 @@ pub struct AccountUsage {
     pub weekly: Option<UsageWindow>,
     pub monthly: Option<UsageWindow>,
     pub fetched_at: i64,
+}
+
+impl AccountUsage {
+    /// `None` means the upstream response contained no recognized quota window,
+    /// so an existing routing state must be preserved rather than guessed.
+    pub fn quota_available(&self) -> Option<bool> {
+        let remaining = [
+            self.rolling.as_ref().map(|window| window.remaining_percent),
+            self.weekly.as_ref().map(|window| window.remaining_percent),
+            self.monthly.as_ref().map(|window| window.remaining_percent),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+        if !remaining.is_empty() {
+            return Some(remaining.into_iter().all(|value| value > 0.0));
+        }
+        if let (Some(limit), Some(used)) =
+            (self.monthly_limit_microcents, self.monthly_usage_microcents)
+            && limit > 0
+        {
+            return Some(used < limit);
+        }
+        self.balance_microcents.map(|balance| balance > 0)
+    }
+}
+
+#[cfg(test)]
+mod account_usage_tests {
+    use super::{AccountUsage, UsageWindow};
+
+    fn usage(remaining: &[f64]) -> AccountUsage {
+        let mut windows = remaining.iter().map(|value| UsageWindow {
+            usage_percent: 100.0 - value,
+            remaining_percent: *value,
+            reset_in_sec: 0,
+            status: "ok".into(),
+        });
+        AccountUsage {
+            plan_name: "test".into(),
+            plan_status: "active".into(),
+            region: None,
+            balance_microcents: None,
+            monthly_limit_microcents: None,
+            monthly_usage_microcents: None,
+            rolling: windows.next(),
+            weekly: windows.next(),
+            monthly: windows.next(),
+            fetched_at: 0,
+        }
+    }
+
+    #[test]
+    fn quota_requires_every_reported_window_to_have_capacity() {
+        assert_eq!(usage(&[25.0, 10.0]).quota_available(), Some(true));
+        assert_eq!(usage(&[25.0, 0.0]).quota_available(), Some(false));
+        assert_eq!(usage(&[]).quota_available(), None);
+    }
+
+    #[test]
+    fn quota_falls_back_to_billing_capacity_when_windows_are_absent() {
+        let mut value = usage(&[]);
+        value.monthly_limit_microcents = Some(1_000);
+        value.monthly_usage_microcents = Some(1_000);
+        assert_eq!(value.quota_available(), Some(false));
+
+        value.monthly_usage_microcents = Some(900);
+        assert_eq!(value.quota_available(), Some(true));
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]

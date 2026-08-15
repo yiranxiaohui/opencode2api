@@ -266,7 +266,12 @@ pub(crate) async fn proxy_inner(
             }
         };
         if is_quota_error(status, &bytes) {
-            st.begin_cooldown(&row.id);
+            if let Err(error) = st
+                .db
+                .set_quota_exhausted(&row.id, true, crate::models::now_secs())
+            {
+                tracing::error!(account_id = %row.id, "failed to persist quota-exhausted state: {error}");
+            }
             let _ = logs::insert_log(
                 &st,
                 &LogInput {
@@ -282,7 +287,7 @@ pub(crate) async fn proxy_inner(
                     completion_tokens: None,
                     cached_tokens: None,
                     cache_creation_tokens: None,
-                    error: Some("额度耗尽，切换至备用账号".into()),
+                    error: Some("额度耗尽，已停止该账号路由并切换至备用账号".into()),
                 },
             );
             last_quota_error = Some((status, resp_headers, bytes));
@@ -471,8 +476,8 @@ fn credential_candidates(headers: &HeaderMap) -> Vec<&str> {
 }
 
 /// Enabled, model-matching accounts ordered by descending rendezvous hash,
-/// with quota-cooled accounts skipped. Distinguishes an empty configured pool
-/// from a pool whose eligible accounts are all cooling down.
+/// with quota-exhausted accounts skipped. Distinguishes an empty configured
+/// pool from a pool whose eligible accounts are all unavailable.
 pub(crate) async fn routing_candidates(
     st: &AppState,
     model: Option<&str>,
@@ -483,11 +488,10 @@ pub(crate) async fn routing_candidates(
     if base.is_empty() {
         return Err(ApiError::BadRequest("no account configured".into()));
     }
-    let now = crate::models::now_secs();
-    let ordered = ordered_candidates(&base, affinity, |id| st.in_quota_cooldown(id, now));
+    let ordered = ordered_candidates(&base, affinity);
     if ordered.is_empty() {
-        return Err(ApiError::BadRequest(
-            "all candidate accounts are in quota cooldown".into(),
+        return Err(ApiError::ServiceUnavailable(
+            "all candidate accounts are quota exhausted".into(),
         ));
     }
     Ok(ordered.into_iter().cloned().collect())
@@ -533,21 +537,16 @@ fn select_sticky_account<'a>(
         .max_by_key(|row| rendezvous_hash(affinity, &row.id))
 }
 
-/// Accounts in `candidates` (already enabled + model-matched) that are not in
-/// quota cooldown, ordered by descending rendezvous hash. First = the sticky
-/// winner; the remaining order is the deterministic failover order for the
-/// affinity key. Independent of input order.
-fn ordered_candidates<'a, F>(
+/// Accounts in `candidates` (already enabled + model-matched) whose persisted
+/// quota state is healthy, ordered by descending rendezvous hash. First = the
+/// sticky winner; the rest form the deterministic failover order.
+fn ordered_candidates<'a>(
     candidates: &'a [crate::db::KeyRow],
     affinity: &str,
-    in_cooldown: F,
-) -> Vec<&'a crate::db::KeyRow>
-where
-    F: Fn(&str) -> bool,
-{
+) -> Vec<&'a crate::db::KeyRow> {
     let mut ordered: Vec<&crate::db::KeyRow> = candidates
         .iter()
-        .filter(|row| !in_cooldown(&row.id))
+        .filter(|row| row.quota_exhausted_at.is_none())
         .collect();
     ordered.sort_by_key(|row| std::cmp::Reverse(rendezvous_hash(affinity, &row.id)));
     ordered
@@ -585,9 +584,6 @@ pub(crate) const QUOTA_KEYWORDS: &[&str] = &[
     "额度",
     "余额",
 ];
-
-/// How long an account that returned a quota-exhaustion error is skipped.
-pub(crate) const QUOTA_COOLDOWN_SECS: i64 = 900;
 
 /// Classify an upstream non-success response as quota exhaustion. HTTP 402 is a
 /// hard signal; other 4xx bodies are scanned in the OpenAI error fields only.
@@ -658,6 +654,7 @@ mod tests {
             cookie_enc: None,
             workspace_id: None,
             usage_cache: None,
+            quota_exhausted_at: None,
         }
     }
 
@@ -817,8 +814,7 @@ mod tests {
     fn ordered_candidates_are_deterministic_and_match_sticky_first() {
         let rows = vec![key("a", &["m"]), key("b", &["m"]), key("c", &["m"])];
         let affinity = "client:model:session";
-        let no_cooldown = |_: &str| false;
-        let order = ordered_candidates(&rows, affinity, no_cooldown);
+        let order = ordered_candidates(&rows, affinity);
         let ids: Vec<&str> = order.iter().map(|row| row.id.as_str()).collect();
         assert_eq!(ids.len(), 3);
         // First choice is exactly the current sticky selector's choice.
@@ -828,7 +824,7 @@ mod tests {
         );
         // Order is independent of candidate input order.
         let reversed: Vec<KeyRow> = rows.iter().rev().cloned().collect();
-        let reversed_ids: Vec<&str> = ordered_candidates(&reversed, affinity, no_cooldown)
+        let reversed_ids: Vec<&str> = ordered_candidates(&reversed, affinity)
             .into_iter()
             .map(|row| row.id.as_str())
             .collect();
@@ -836,10 +832,11 @@ mod tests {
     }
 
     #[test]
-    fn ordered_candidates_skip_accounts_in_cooldown() {
-        let rows = vec![key("a", &["m"]), key("b", &["m"]), key("c", &["m"])];
-        let cool_b = |id: &str| id == "b";
-        let ids: Vec<&str> = ordered_candidates(&rows, "k", cool_b)
+    fn ordered_candidates_skip_quota_exhausted_accounts() {
+        let mut exhausted = key("b", &["m"]);
+        exhausted.quota_exhausted_at = Some(123);
+        let rows = vec![key("a", &["m"]), exhausted, key("c", &["m"])];
+        let ids: Vec<&str> = ordered_candidates(&rows, "k")
             .into_iter()
             .map(|row| row.id.as_str())
             .collect();
@@ -848,11 +845,18 @@ mod tests {
     }
 
     #[test]
-    fn all_cooled_candidates_yield_empty_active_list() {
-        let rows = vec![key("a", &["m"]), key("b", &["m"])];
+    fn all_quota_exhausted_candidates_yield_empty_active_list() {
+        let rows = vec!["a", "b"]
+            .into_iter()
+            .map(|id| {
+                let mut row = key(id, &["m"]);
+                row.quota_exhausted_at = Some(123);
+                row
+            })
+            .collect();
         let base = candidates_for_model(rows, Some("m"));
         assert_eq!(base.len(), 2);
-        let active = ordered_candidates(&base, "k", |_| true);
+        let active = ordered_candidates(&base, "k");
         assert!(active.is_empty());
     }
 

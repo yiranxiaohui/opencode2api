@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
   cookie_enc TEXT,
   workspace_id TEXT,
   usage_cache TEXT,
+  quota_exhausted_at INTEGER,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -428,6 +429,51 @@ mod m20260812_000009_add_disabled_models {
     }
 }
 
+mod m20260815_000013_add_quota_exhausted_state {
+    use sea_orm_migration::prelude::*;
+    use sea_orm_migration::sea_orm::{DbBackend, Statement};
+
+    pub struct Migration;
+
+    impl MigrationName for Migration {
+        fn name(&self) -> &str {
+            "m20260815_000013_add_quota_exhausted_state"
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl MigrationTrait for Migration {
+        async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            let connection = manager.get_connection();
+            let columns = connection
+                .query_all(Statement::from_string(
+                    DbBackend::Sqlite,
+                    "PRAGMA table_info('api_keys')".to_owned(),
+                ))
+                .await?;
+            let has_quota_exhausted_at = columns.iter().any(|row| {
+                row.try_get::<String>("", "name").as_deref() == Ok("quota_exhausted_at")
+            });
+            if !has_quota_exhausted_at {
+                connection
+                    .execute_unprepared(
+                        "ALTER TABLE api_keys ADD COLUMN quota_exhausted_at INTEGER",
+                    )
+                    .await?;
+            }
+            Ok(())
+        }
+
+        async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            manager
+                .get_connection()
+                .execute_unprepared("ALTER TABLE api_keys DROP COLUMN quota_exhausted_at")
+                .await?;
+            Ok(())
+        }
+    }
+}
+
 mod m20260812_000010_add_account_type {
     use sea_orm_migration::prelude::*;
     use sea_orm_migration::sea_orm::{DbBackend, Statement};
@@ -589,6 +635,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260812_000010_add_account_type::Migration),
             Box::new(m20260814_000011_rename_persisted_login_key::Migration),
             Box::new(m20260814_000012_add_management_auth::Migration),
+            Box::new(m20260815_000013_add_quota_exhausted_state::Migration),
         ]
     }
 }
@@ -667,12 +714,20 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(applied, 12);
+        assert_eq!(applied, 13);
         assert_eq!(has_proxy_id, 1);
         assert_eq!(has_client_key_enc, 1);
         assert_eq!(has_is_enabled, 1);
         assert_eq!(has_cookie, 2);
         assert_eq!(has_usage_cache, 1);
+        let has_quota_exhausted_at: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('api_keys') WHERE name = 'quota_exhausted_at'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(has_quota_exhausted_at, 1);
         let has_account_type: i64 = connection
             .query_row(
                 "SELECT COUNT(*) FROM pragma_table_info('api_keys') WHERE name = 'account_type'",
@@ -800,6 +855,14 @@ mod tests {
         assert_eq!(has_client_key_enc, 1);
         assert_eq!(is_enabled, 1);
         assert_eq!(has_usage_cache, 1);
+        let has_quota_exhausted_at: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('api_keys') WHERE name = 'quota_exhausted_at'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(has_quota_exhausted_at, 1);
         let account_type: String = connection
             .query_row(
                 "SELECT account_type FROM api_keys WHERE id = 'existing'",

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { keysApi } from '../api/keys'
 import type { KeySummary } from '../api/types'
@@ -17,30 +17,26 @@ interface Props {
   onSetEnabled: (id: string, enabled: boolean) => void
 }
 
-const isCooling = (key: KeySummary, now: number) =>
-  key.is_enabled && key.cooldown_until != null && key.cooldown_until > now
+const isQuotaExhausted = (key: KeySummary) =>
+  key.is_enabled && key.quota_exhausted_at != null
 
-const statusLabel = (key: KeySummary, now: number) => {
+const statusLabel = (key: KeySummary) => {
   if (!key.is_enabled) return '已禁用'
-  if (isCooling(key, now)) return `冷却中 · ${Math.max(1, Math.ceil((key.cooldown_until! - now) / 60))} 分钟`
+  if (isQuotaExhausted(key)) {
+    return key.has_cookie ? '额度耗尽 · 等待系统确认恢复' : '额度耗尽 · 请更新 API Key'
+  }
   return '正常'
 }
 
 export default function KeyList({ keys, selectedId, onOpen, onTest, onEdit, onDelete, onSetEnabled }: Props) {
   const [query, setQuery] = useState('')
   const [activeTag, setActiveTag] = useState<string | null>(null)
-  const [status, setStatus] = useState<'all' | 'active' | 'cooldown' | 'disabled'>('all')
+  const [status, setStatus] = useState<'all' | 'active' | 'exhausted' | 'disabled'>('all')
   const [accountType, setAccountType] = useState<'all' | 'normal' | 'go'>('all')
-  const [now, setNow] = useState(() => Math.floor(Date.now() / 1000))
   const [queryingIds, setQueryingIds] = useState<Set<string>>(() => new Set())
   const [inviteId, setInviteId] = useState<string | null>(null)
   const [rewardAccount, setRewardAccount] = useState<KeySummary | null>(null)
   const queryClient = useQueryClient()
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1_000)
-    return () => window.clearInterval(timer)
-  }, [])
 
   const loadUsage = async (key: KeySummary) => {
     setQueryingIds((current) => new Set(current).add(key.id))
@@ -52,6 +48,7 @@ export default function KeyList({ keys, selectedId, onOpen, onTest, onEdit, onDe
           ? { ...item, usage_cache: usage, account_type: nextAccountType }
           : item),
       )
+      await queryClient.invalidateQueries({ queryKey: keysQueryKey })
       toast(`${key.name} 额度已更新`, 'ok')
     } catch (error) {
       toast(error instanceof Error ? error.message : '额度查询失败', 'err')
@@ -87,15 +84,15 @@ export default function KeyList({ keys, selectedId, onOpen, onTest, onEdit, onDe
     return keys.filter((k) => {
       if (activeTag && !k.tags.includes(activeTag)) return false
       if (accountType !== 'all' && k.account_type !== accountType) return false
-      if (status === 'active' && (!k.is_enabled || isCooling(k, now))) return false
-      if (status === 'cooldown' && !isCooling(k, now)) return false
+      if (status === 'active' && (!k.is_enabled || isQuotaExhausted(k))) return false
+      if (status === 'exhausted' && !isQuotaExhausted(k)) return false
       if (status === 'disabled' && k.is_enabled) return false
       if (!q) return true
       return (
         k.name.toLowerCase().includes(q) || k.notes.toLowerCase().includes(q)
       )
     })
-  }, [keys, query, activeTag, status, accountType, now])
+  }, [keys, query, activeTag, status, accountType])
 
   return (
     <>
@@ -132,7 +129,7 @@ export default function KeyList({ keys, selectedId, onOpen, onTest, onEdit, onDe
         {([
           ['all', '全部'],
           ['active', '正常'],
-          ['cooldown', '冷却中'],
+          ['exhausted', '额度耗尽'],
           ['disabled', '已禁用'],
         ] as const).map(([value, label]) => (
           <button key={value} className={`tag-chip ${status === value ? 'on' : ''}`} onClick={() => setStatus(value)}>
@@ -161,7 +158,7 @@ export default function KeyList({ keys, selectedId, onOpen, onTest, onEdit, onDe
         {filtered.map((k) => {
           const usage = k.usage_cache
           const isQuerying = queryingIds.has(k.id)
-          const cooling = isCooling(k, now)
+          const quotaExhausted = isQuotaExhausted(k)
           return (
             <div
               key={k.id}
@@ -171,13 +168,13 @@ export default function KeyList({ keys, selectedId, onOpen, onTest, onEdit, onDe
               onClick={() => onOpen(k)}
               onKeyDown={(e) => e.key === 'Enter' && onOpen(k)}
             >
-            <span className={`led ${!k.is_enabled ? '' : cooling ? 'warn' : 'ok'}`} title={statusLabel(k, now)} />
+            <span className={`led ${!k.is_enabled ? '' : quotaExhausted ? 'warn' : 'ok'}`} title={statusLabel(k)} />
             <div className="key-name">
               <span className="nm">{k.name}</span>
               <span className={`account-type-badge ${k.account_type === 'go' ? 'go' : ''}`}>{k.account_type === 'go' ? 'GO' : '普通'}</span>
               {!k.is_enabled && <span className="disabled-badge">已禁用</span>}
-              {cooling && <span className="cooldown-badge">{statusLabel(k, now)}</span>}
-              {k.is_enabled && !cooling && <span className="active-badge">正常</span>}
+              {quotaExhausted && <span className="cooldown-badge">{statusLabel(k)}</span>}
+              {k.is_enabled && !quotaExhausted && <span className="active-badge">正常</span>}
               {k.proxy_name && <span className="proxy-badge">🌐 {k.proxy_name}</span>}
             </div>
             <div className="key-usage">
