@@ -45,6 +45,11 @@ async fn messages_inner(
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string();
+    if let Err(error) = super::proxy::validate_model_access(&st, &client_key, Some(model.as_str()))
+    {
+        logs::record_failure(&st, &client_key, None, "POST", "/messages", 0, &error);
+        return Err(error);
+    }
     // Zen's MiniMax and Qwen models speak Anthropic Messages natively. Sending
     // those through the legacy Messages -> Chat Completions adapter changes the
     // payload and targets the wrong upstream endpoint, so preserve the request

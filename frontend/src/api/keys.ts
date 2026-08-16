@@ -76,7 +76,10 @@ export const proxiesApi = {
 
 export const clientKeysApi = {
   list: () => get<ClientApiKey[]>('/api/client-keys'),
-  create: (name: string) => post<ClientApiKeyCreated>('/api/client-keys', { name }),
+  create: (name: string, allowed_models: string[] | null) =>
+    post<ClientApiKeyCreated>('/api/client-keys', { name, allowed_models }),
+  updateModels: (id: string, allowed_models: string[] | null) =>
+    put<{ ok: boolean }>(`/api/client-keys/${id}/models`, { allowed_models }),
   remove: (id: string) => del<{ ok: boolean }>(`/api/client-keys/${id}`),
 }
 

@@ -82,6 +82,19 @@ pub struct ClientKeyRow {
     pub created_at: i64,
     pub last_used_at: Option<i64>,
     pub key_enc: Option<String>,
+    /// `None` grants access to every globally enabled model. `Some` is a
+    /// per-client allowlist.
+    pub allowed_models: Option<Vec<String>>,
+}
+
+pub struct ClientKeyData<'a> {
+    pub id: &'a str,
+    pub name: &'a str,
+    pub key_hash: &'a str,
+    pub key_enc: &'a str,
+    pub prefix: &'a str,
+    pub created_at: i64,
+    pub allowed_models: Option<&'a [String]>,
 }
 
 #[derive(Debug, Clone)]
@@ -166,6 +179,20 @@ fn admin_token_from_row(r: &rusqlite::Row) -> rusqlite::Result<AdminTokenRow> {
         scopes: serde_json::from_str(&scopes_json).unwrap_or_default(),
         created_at: r.get(4)?,
         last_used_at: r.get(5)?,
+    })
+}
+
+fn client_key_from_row(r: &rusqlite::Row) -> rusqlite::Result<ClientKeyRow> {
+    let allowed_models_json: Option<String> = r.get(6)?;
+    Ok(ClientKeyRow {
+        id: r.get(0)?,
+        name: r.get(1)?,
+        prefix: r.get(2)?,
+        created_at: r.get(3)?,
+        last_used_at: r.get(4)?,
+        key_enc: r.get(5)?,
+        allowed_models: allowed_models_json
+            .map(|value| serde_json::from_str(&value).unwrap_or_default()),
     })
 }
 
@@ -315,38 +342,43 @@ impl Db {
     pub fn list_client_keys(&self) -> Result<Vec<ClientKeyRow>, ApiError> {
         let conn = self.0.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, name, prefix, created_at, last_used_at, key_enc
+            "SELECT id, name, prefix, created_at, last_used_at, key_enc, allowed_models
              FROM client_api_keys ORDER BY created_at DESC",
         )?;
-        let rows = stmt.query_map([], |r| {
-            Ok(ClientKeyRow {
-                id: r.get(0)?,
-                name: r.get(1)?,
-                prefix: r.get(2)?,
-                created_at: r.get(3)?,
-                last_used_at: r.get(4)?,
-                key_enc: r.get(5)?,
-            })
-        })?;
+        let rows = stmt.query_map([], client_key_from_row)?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    pub fn insert_client_key(
-        &self,
-        id: &str,
-        name: &str,
-        key_hash: &str,
-        key_enc: &str,
-        prefix: &str,
-        created_at: i64,
-    ) -> Result<(), ApiError> {
+    pub fn insert_client_key(&self, data: ClientKeyData<'_>) -> Result<(), ApiError> {
+        let allowed_models_json = data.allowed_models.map(serde_json::to_string).transpose()?;
         let conn = self.0.lock().unwrap();
         conn.execute(
-            "INSERT INTO client_api_keys(id, name, key_hash, key_enc, prefix, created_at)
-             VALUES(?1, ?2, ?3, ?4, ?5, ?6)",
-            params![id, name, key_hash, key_enc, prefix, created_at],
+            "INSERT INTO client_api_keys(id, name, key_hash, key_enc, prefix, created_at, allowed_models)
+             VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                data.id,
+                data.name,
+                data.key_hash,
+                data.key_enc,
+                data.prefix,
+                data.created_at,
+                allowed_models_json
+            ],
         )?;
         Ok(())
+    }
+
+    pub fn set_client_key_allowed_models(
+        &self,
+        id: &str,
+        allowed_models: Option<&[String]>,
+    ) -> Result<bool, ApiError> {
+        let allowed_models_json = allowed_models.map(serde_json::to_string).transpose()?;
+        let conn = self.0.lock().unwrap();
+        Ok(conn.execute(
+            "UPDATE client_api_keys SET allowed_models = ?2 WHERE id = ?1",
+            params![id, allowed_models_json],
+        )? > 0)
     }
 
     pub fn delete_client_key(&self, id: &str) -> Result<bool, ApiError> {
@@ -357,19 +389,10 @@ impl Db {
     pub fn client_key_by_hash(&self, key_hash: &str) -> Result<Option<ClientKeyRow>, ApiError> {
         let conn = self.0.lock().unwrap();
         conn.query_row(
-            "SELECT id, name, prefix, created_at, last_used_at, key_enc
+            "SELECT id, name, prefix, created_at, last_used_at, key_enc, allowed_models
              FROM client_api_keys WHERE key_hash = ?1",
             params![key_hash],
-            |r| {
-                Ok(ClientKeyRow {
-                    id: r.get(0)?,
-                    name: r.get(1)?,
-                    prefix: r.get(2)?,
-                    created_at: r.get(3)?,
-                    last_used_at: r.get(4)?,
-                    key_enc: r.get(5)?,
-                })
-            },
+            client_key_from_row,
         )
         .optional()
         .map_err(ApiError::from)
@@ -1053,7 +1076,7 @@ fn log_group_stats(
 
 #[cfg(test)]
 mod tests {
-    use super::{Db, KeyData};
+    use super::{ClientKeyData, Db, KeyData};
     use crate::models::AccountType;
 
     #[tokio::test]
@@ -1095,6 +1118,37 @@ mod tests {
             db.get_key("account").unwrap().unwrap().quota_exhausted_at,
             None
         );
+        drop(db);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn client_key_model_allowlist_roundtrips_and_can_be_cleared() {
+        let path = std::env::temp_dir().join(format!(
+            "opencode2api-client-models-{}.db",
+            uuid::Uuid::new_v4()
+        ));
+        crate::migration::run(&path).await.unwrap();
+        let db = Db::open(&path).unwrap();
+        let allowed_models = vec!["model-a".to_string(), "model-b".to_string()];
+        db.insert_client_key(ClientKeyData {
+            id: "client",
+            name: "Client",
+            key_hash: "hash",
+            key_enc: "encrypted",
+            prefix: "oc_…",
+            created_at: 1,
+            allowed_models: Some(&allowed_models),
+        })
+        .unwrap();
+
+        let row = db.client_key_by_hash("hash").unwrap().unwrap();
+        assert_eq!(row.allowed_models, Some(allowed_models));
+
+        assert!(db.set_client_key_allowed_models("client", None).unwrap());
+        let row = db.client_key_by_hash("hash").unwrap().unwrap();
+        assert_eq!(row.allowed_models, None);
+
         drop(db);
         std::fs::remove_file(path).unwrap();
     }

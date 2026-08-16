@@ -44,6 +44,7 @@ pub async fn chat_proxy(
         created_at: 0,
         last_used_at: None,
         key_enc: None,
+        allowed_models: None,
     };
     match proxy_inner(st, method, &path, &headers, body, Some(client)).await {
         Ok(resp) => resp,
@@ -80,10 +81,7 @@ pub(crate) async fn proxy_inner(
         .map_err(|e| ApiError::Internal(format!("read request body: {e}")))?
         .to_bytes();
     let (model, stream) = request_meta(&body_bytes);
-    if let Some(model) = model.as_deref()
-        && st.db.is_model_disabled(model)?
-    {
-        let error = ApiError::BadRequest(format!("model disabled: {model}"));
+    if let Err(error) = validate_model_access(&st, &client, model.as_deref()) {
         logs::record_failure(&st, &client, None, &method_str, path, 0, &error);
         return Err(error);
     }
@@ -458,6 +456,41 @@ pub(crate) fn authenticate_client(
     Err(ApiError::Unauthorized("invalid API key".into()))
 }
 
+pub(crate) fn validate_model_access(
+    st: &AppState,
+    client: &crate::db::ClientKeyRow,
+    model: Option<&str>,
+) -> Result<(), ApiError> {
+    if let Some(model) = model.filter(|model| !model.is_empty())
+        && st.db.is_model_disabled(model)?
+    {
+        return Err(ApiError::BadRequest(format!("model disabled: {model}")));
+    }
+    if model_allowed_for_client(client, model) {
+        return Ok(());
+    }
+    match model.filter(|model| !model.is_empty()) {
+        Some(model) => Err(ApiError::Forbidden(format!(
+            "model not allowed for this API key: {model}"
+        ))),
+        None => Err(ApiError::Forbidden(
+            "model is required for this restricted API key".into(),
+        )),
+    }
+}
+
+pub(crate) fn model_allowed_for_client(
+    client: &crate::db::ClientKeyRow,
+    model: Option<&str>,
+) -> bool {
+    match &client.allowed_models {
+        None => true,
+        Some(allowed_models) => model
+            .filter(|model| !model.is_empty())
+            .is_some_and(|model| allowed_models.iter().any(|allowed| allowed == model)),
+    }
+}
+
 /// Accept both common SDK conventions. Keep both candidates so a stale header
 /// injected by one client layer cannot shadow a valid credential from another.
 fn credential_candidates(headers: &HeaderMap) -> Vec<&str> {
@@ -621,8 +654,8 @@ fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
 mod tests {
     use super::{
         affinity_key, candidates_for_model, credential_candidates, include_stream_usage,
-        insert_upstream_auth, is_quota_error, native_endpoint_for_model, ordered_candidates,
-        select_sticky_account, should_forward_stream,
+        insert_upstream_auth, is_quota_error, model_allowed_for_client, native_endpoint_for_model,
+        ordered_candidates, select_sticky_account, should_forward_stream,
     };
     use crate::db::KeyRow;
     use crate::models::{AccountType, ModelInfo};
@@ -656,6 +689,32 @@ mod tests {
             usage_cache: None,
             quota_exhausted_at: None,
         }
+    }
+
+    fn client(allowed_models: Option<&[&str]>) -> crate::db::ClientKeyRow {
+        crate::db::ClientKeyRow {
+            id: "client".into(),
+            name: "Client".into(),
+            prefix: "oc_…".into(),
+            created_at: 0,
+            last_used_at: None,
+            key_enc: None,
+            allowed_models: allowed_models
+                .map(|models| models.iter().map(|model| (*model).to_string()).collect()),
+        }
+    }
+
+    #[test]
+    fn unrestricted_client_accepts_requests_without_a_model() {
+        assert!(model_allowed_for_client(&client(None), None));
+    }
+
+    #[test]
+    fn restricted_client_accepts_only_an_explicit_allowlisted_model() {
+        let client = client(Some(&["model-a", "model-b"]));
+        assert!(model_allowed_for_client(&client, Some("model-b")));
+        assert!(!model_allowed_for_client(&client, Some("model-c")));
+        assert!(!model_allowed_for_client(&client, None));
     }
 
     #[test]

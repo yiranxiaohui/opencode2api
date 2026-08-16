@@ -474,6 +474,51 @@ mod m20260815_000013_add_quota_exhausted_state {
     }
 }
 
+mod m20260816_000014_add_client_key_allowed_models {
+    use sea_orm_migration::prelude::*;
+    use sea_orm_migration::sea_orm::{DbBackend, Statement};
+
+    pub struct Migration;
+
+    impl MigrationName for Migration {
+        fn name(&self) -> &str {
+            "m20260816_000014_add_client_key_allowed_models"
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl MigrationTrait for Migration {
+        async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            let connection = manager.get_connection();
+            let columns = connection
+                .query_all(Statement::from_string(
+                    DbBackend::Sqlite,
+                    "PRAGMA table_info('client_api_keys')".to_owned(),
+                ))
+                .await?;
+            let has_allowed_models = columns
+                .iter()
+                .any(|row| row.try_get::<String>("", "name").as_deref() == Ok("allowed_models"));
+            if !has_allowed_models {
+                connection
+                    .execute_unprepared(
+                        "ALTER TABLE client_api_keys ADD COLUMN allowed_models TEXT",
+                    )
+                    .await?;
+            }
+            Ok(())
+        }
+
+        async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            manager
+                .get_connection()
+                .execute_unprepared("ALTER TABLE client_api_keys DROP COLUMN allowed_models")
+                .await?;
+            Ok(())
+        }
+    }
+}
+
 mod m20260812_000010_add_account_type {
     use sea_orm_migration::prelude::*;
     use sea_orm_migration::sea_orm::{DbBackend, Statement};
@@ -636,6 +681,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260814_000011_rename_persisted_login_key::Migration),
             Box::new(m20260814_000012_add_management_auth::Migration),
             Box::new(m20260815_000013_add_quota_exhausted_state::Migration),
+            Box::new(m20260816_000014_add_client_key_allowed_models::Migration),
         ]
     }
 }
@@ -714,7 +760,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(applied, 13);
+        assert_eq!(applied, 14);
         assert_eq!(has_proxy_id, 1);
         assert_eq!(has_client_key_enc, 1);
         assert_eq!(has_is_enabled, 1);
@@ -753,6 +799,14 @@ mod tests {
             )
             .unwrap();
         assert_eq!(management_auth_tables, 2);
+        let has_allowed_models: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('client_api_keys') WHERE name = 'allowed_models'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(has_allowed_models, 1);
 
         drop(connection);
         std::fs::remove_file(path).unwrap();
@@ -783,7 +837,18 @@ mod tests {
                 );
                 INSERT INTO api_keys
                     (id, name, base_url, api_key_enc, created_at, updated_at)
-                VALUES ('existing', 'Existing', 'https://example.com', 'secret', 1, 1);",
+                VALUES ('existing', 'Existing', 'https://example.com', 'secret', 1, 1);
+                CREATE TABLE client_api_keys (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+                    key_hash TEXT NOT NULL UNIQUE,
+                    prefix TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    last_used_at INTEGER
+                );
+                INSERT INTO client_api_keys
+                    (id, name, key_hash, prefix, created_at)
+                VALUES ('existing-client', 'Existing Client', 'hash', 'oc_…', 1);",
             )
             .unwrap();
         drop(connection);
@@ -871,6 +936,22 @@ mod tests {
             )
             .unwrap();
         assert_eq!(account_type, "normal");
+        let has_allowed_models: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('client_api_keys') WHERE name = 'allowed_models'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(has_allowed_models, 1);
+        let existing_client: (String, Option<String>) = connection
+            .query_row(
+                "SELECT name, allowed_models FROM client_api_keys WHERE id = 'existing-client'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(existing_client, ("Existing Client".into(), None));
 
         drop(connection);
         std::fs::remove_file(path).unwrap();

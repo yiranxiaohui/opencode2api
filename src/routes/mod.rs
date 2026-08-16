@@ -46,6 +46,7 @@ pub fn build_router(state: AppState) -> Router {
             get(client_keys::list).post(client_keys::create),
         )
         .route("/client-keys/{id}", delete(client_keys::delete))
+        .route("/client-keys/{id}/models", put(client_keys::update_models))
         .route("/logs", get(logs::list).delete(logs::clear))
         .route("/logs/stats", get(logs::stats))
         .route("/models", get(models::catalog))

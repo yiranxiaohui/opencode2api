@@ -352,6 +352,15 @@ pub struct ImportResult {
 #[serde(deny_unknown_fields)]
 pub struct ClientKeyInput {
     pub name: String,
+    /// `null`/omitted grants access to every globally enabled model.
+    pub allowed_models: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClientKeyModelsInput {
+    /// `null` grants access to every globally enabled model.
+    pub allowed_models: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -363,6 +372,8 @@ pub struct ClientKeySummary {
     pub last_used_at: Option<i64>,
     /// Decrypted only for authenticated management requests. Legacy keys are unavailable.
     pub api_key: Option<String>,
+    /// `null` grants access to every globally enabled model.
+    pub allowed_models: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize)]

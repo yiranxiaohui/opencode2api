@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { clientKeysApi } from '../api/keys'
-import type { ClientApiKey } from '../api/types'
+import { clientKeysApi, modelsApi } from '../api/keys'
+import type { ClientApiKey, ManagedModel } from '../api/types'
 import { toast } from '../lib/toast'
+import ClientKeyModelsModal from './ClientKeyModelsModal'
 import CopyButton from './CopyButton'
-import { EyeIcon, EyeOffIcon, KeyIcon, PlusIcon, TrashIcon } from './icons'
+import { EyeIcon, EyeOffIcon, KeyIcon, ModelIcon, PlusIcon, TrashIcon } from './icons'
 
 interface Props {
   onKeysChange?: (keys: ClientApiKey[]) => void
@@ -16,6 +17,11 @@ export default function ClientKeys({ onKeysChange }: Props) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [visible, setVisible] = useState<Set<string>>(new Set())
+  const [models, setModels] = useState<ManagedModel[]>([])
+  const [modelsLoading, setModelsLoading] = useState(true)
+  const [createAllowedModels, setCreateAllowedModels] = useState<string[] | null>(null)
+  const [modelEditor, setModelEditor] = useState<{ kind: 'create' } | { kind: 'key', key: ClientApiKey } | null>(null)
+  const [modelBusy, setModelBusy] = useState(false)
 
   const replaceKeys = (next: ClientApiKey[]) => {
     setKeys(next)
@@ -34,6 +40,17 @@ export default function ClientKeys({ onKeysChange }: Props) {
       .finally(() => {
         if (live) setLoading(false)
       })
+
+    modelsApi.list()
+      .then((items) => {
+        if (live) setModels(items)
+      })
+      .catch((cause) => {
+        if (live) toast(cause instanceof Error ? cause.message : '模型加载失败', 'err')
+      })
+      .finally(() => {
+        if (live) setModelsLoading(false)
+      })
     return () => { live = false }
     // The callback is intentionally excluded; loading depends only on mounting.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -44,10 +61,11 @@ export default function ClientKeys({ onKeysChange }: Props) {
     setError('')
     setBusy(true)
     try {
-      const created = await clientKeysApi.create(name.trim())
+      const created = await clientKeysApi.create(name.trim(), createAllowedModels)
       replaceKeys([created, ...keys])
       setVisible((current) => new Set(current).add(created.id))
       setName('')
+      setCreateAllowedModels(null)
       toast('客户端访问密钥已创建，可随时再次复制', 'ok')
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '创建失败')
@@ -76,6 +94,29 @@ export default function ClientKeys({ onKeysChange }: Props) {
     })
   }
 
+  const saveModelScope = async (allowedModels: string[] | null) => {
+    if (!modelEditor) return
+    if (modelEditor.kind === 'create') {
+      setCreateAllowedModels(allowedModels)
+      setModelEditor(null)
+      return
+    }
+
+    setModelBusy(true)
+    try {
+      await clientKeysApi.updateModels(modelEditor.key.id, allowedModels)
+      replaceKeys(keys.map((key) => (
+        key.id === modelEditor.key.id ? { ...key, allowed_models: allowedModels } : key
+      )))
+      setModelEditor(null)
+      toast('模型访问范围已更新', 'ok')
+    } catch (cause) {
+      toast(cause instanceof Error ? cause.message : '模型范围保存失败', 'err')
+    } finally {
+      setModelBusy(false)
+    }
+  }
+
   return (
     <div className="client-keys-page">
       <div className="panel client-key-create-panel">
@@ -96,6 +137,14 @@ export default function ClientKeys({ onKeysChange }: Props) {
             value={name}
             onChange={(event) => setName(event.target.value)}
           />
+          <button
+            className="btn client-key-create-models"
+            type="button"
+            disabled={modelsLoading}
+            onClick={() => setModelEditor({ kind: 'create' })}
+          >
+            <ModelIcon size={13} /> {modelScopeLabel(createAllowedModels)}
+          </button>
           <button className="btn btn-primary" type="submit" disabled={busy || !name.trim()}>
             <PlusIcon size={13} /> {busy ? '创建中…' : '创建密钥'}
           </button>
@@ -113,7 +162,7 @@ export default function ClientKeys({ onKeysChange }: Props) {
 
       <div className="panel client-key-table">
         <div className="client-key-table-row client-key-table-header" aria-hidden="true">
-          <span>名称</span><span>密钥</span><span>使用情况</span><span>操作</span>
+          <span>名称</span><span>密钥</span><span>模型范围</span><span>使用情况</span><span>操作</span>
         </div>
         {loading ? (
           <div className="client-key-empty small">正在加载…</div>
@@ -144,6 +193,14 @@ export default function ClientKeys({ onKeysChange }: Props) {
                   </button>
                 ) : <span className="legacy-key-badge">旧密钥不可恢复</span>}
               </div>
+              <button
+                className="btn btn-sm client-key-model-button"
+                type="button"
+                onClick={() => setModelEditor({ kind: 'key', key })}
+                title="设置此密钥可以使用的模型"
+              >
+                <ModelIcon size={12} /> {modelScopeLabel(key.allowed_models)}
+              </button>
               <span className="small client-key-usage">
                 {key.last_used_at ? `最后使用 ${formatTime(key.last_used_at)}` : '尚未使用'}
               </span>
@@ -157,8 +214,23 @@ export default function ClientKeys({ onKeysChange }: Props) {
           )
         })}
       </div>
+
+      {modelEditor && (
+        <ClientKeyModelsModal
+          name={modelEditor.kind === 'create' ? '新访问密钥' : modelEditor.key.name}
+          models={models}
+          initial={modelEditor.kind === 'create' ? createAllowedModels : modelEditor.key.allowed_models}
+          busy={modelBusy}
+          onClose={() => setModelEditor(null)}
+          onSave={(allowedModels) => void saveModelScope(allowedModels)}
+        />
+      )}
     </div>
   )
+}
+
+function modelScopeLabel(allowedModels: string[] | null) {
+  return allowedModels === null ? '全部模型' : `${allowedModels.length} 个模型`
 }
 
 function maskKey(key: string) {

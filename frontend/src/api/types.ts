@@ -141,6 +141,8 @@ export interface ClientApiKey {
   created_at: number
   last_used_at: number | null
   api_key: string | null
+  /** null means every globally enabled model. */
+  allowed_models: string[] | null
 }
 
 export interface ClientApiKeyCreated extends ClientApiKey {

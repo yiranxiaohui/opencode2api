@@ -26,7 +26,7 @@ pub async fn models(
 }
 
 async fn models_inner(st: AppState, headers: &HeaderMap) -> Result<Value, ApiError> {
-    let _client = match super::proxy::authenticate_client(&st, headers) {
+    let client = match super::proxy::authenticate_client(&st, headers) {
         Ok(client) => client,
         Err(error) => {
             super::logs::record_auth_failure(&st, "GET", "/models", &error);
@@ -120,7 +120,13 @@ async fn models_inner(st: AppState, headers: &HeaderMap) -> Result<Value, ApiErr
     let disabled = st.db.disabled_models()?;
     Ok(json!({
         "object": "list",
-        "data": models.into_iter().filter(|(id, _)| !disabled.contains(id)).map(|(_, value)| value).collect::<Vec<_>>()
+        "data": models.into_iter()
+            .filter(|(id, _)| {
+                !disabled.contains(id)
+                    && super::proxy::model_allowed_for_client(&client, Some(id.as_str()))
+            })
+            .map(|(_, value)| value)
+            .collect::<Vec<_>>()
     }))
 }
 
