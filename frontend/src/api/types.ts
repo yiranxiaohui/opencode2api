@@ -66,6 +66,12 @@ export interface AccountUsage {
   rolling: UsageWindow | null; weekly: UsageWindow | null; monthly: UsageWindow | null; fetched_at: number
 }
 
+export interface ProviderRoutingStatus {
+  supported: boolean
+  enabled: boolean | null
+  reason: string | null
+}
+
 export interface InviteLinkResult {
   account_id: string
   account_name: string

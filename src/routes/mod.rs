@@ -68,6 +68,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/keys/{id}/test", post(keys::test))
         .route("/keys/{id}/browser/go", post(browser_login::start_go))
         .route("/keys/{id}/usage", get(keys::usage))
+        .route(
+            "/keys/{id}/provider-routing",
+            get(keys::provider_routing).put(keys::set_provider_routing),
+        )
         .route("/keys/{id}/invite-link", get(keys::get_invite_link))
         .route("/keys/{id}/invite-rewards", get(keys::invite_rewards))
         .route(

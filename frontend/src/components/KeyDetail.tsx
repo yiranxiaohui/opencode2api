@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { keysApi } from '../api/keys'
-import type { AccountUsage, BrowserLoginSession, KeySummary, TestResult } from '../api/types'
+import type { AccountUsage, BrowserLoginSession, KeySummary, ProviderRoutingStatus, TestResult } from '../api/types'
 import { keysQueryKey } from '../hooks/useKeys'
 import { toast } from '../lib/toast'
 import CopyButton from './CopyButton'
@@ -27,6 +27,11 @@ export default function KeyDetail({ summary, onClose, onEdit, onDelete, onSetEna
   const [accountType, setAccountType] = useState(summary.account_type)
   const [goStarting, setGoStarting] = useState(false)
   const [goSession, setGoSession] = useState<BrowserLoginSession | null>(null)
+  const [providerRouting, setProviderRouting] = useState<ProviderRoutingStatus | null>(null)
+  const [providerRoutingLoading, setProviderRoutingLoading] = useState(false)
+  const [providerRoutingBusy, setProviderRoutingBusy] = useState(false)
+  const [providerRoutingError, setProviderRoutingError] = useState('')
+  const providerRoutingRequest = useRef(0)
   const queryClient = useQueryClient()
 
   useEffect(() => {
@@ -44,6 +49,40 @@ export default function KeyDetail({ summary, onClose, onEdit, onDelete, onSetEna
       alive = false
     }
   }, [summary.id])
+
+  const loadProviderRouting = useCallback(async () => {
+    const request = ++providerRoutingRequest.current
+    if (!summary.has_cookie) {
+      setProviderRouting({
+        supported: false,
+        enabled: null,
+        reason: '仅通过 Cookie 导入的 OpenCode Go 账号支持此设置',
+      })
+      setProviderRoutingError('')
+      setProviderRoutingLoading(false)
+      return
+    }
+    setProviderRoutingLoading(true)
+    setProviderRoutingError('')
+    try {
+      const actual = await keysApi.providerRouting(summary.id)
+      if (providerRoutingRequest.current === request) setProviderRouting(actual)
+    } catch (error) {
+      if (providerRoutingRequest.current === request) {
+        setProviderRouting(null)
+        setProviderRoutingError(error instanceof Error ? error.message : '提供商路由状态读取失败')
+      }
+    } finally {
+      if (providerRoutingRequest.current === request) setProviderRoutingLoading(false)
+    }
+  }, [summary.has_cookie, summary.id])
+
+  useEffect(() => {
+    setProviderRouting(null)
+    setProviderRoutingBusy(false)
+    void loadProviderRouting()
+    return () => { providerRoutingRequest.current += 1 }
+  }, [loadProviderRouting])
 
   const runTest = async () => {
     setTesting(true)
@@ -94,6 +133,29 @@ export default function KeyDetail({ summary, onClose, onEdit, onDelete, onSetEna
       toast(error instanceof Error ? error.message : '启动订阅浏览器失败', 'err')
     } finally {
       setGoStarting(false)
+    }
+  }
+
+  const toggleProviderRouting = async () => {
+    if (!providerRouting?.supported || providerRouting.enabled == null) return
+    const enabled = !providerRouting.enabled
+    const request = ++providerRoutingRequest.current
+    setProviderRoutingBusy(true)
+    setProviderRoutingError('')
+    try {
+      const actual = await keysApi.setProviderRouting(summary.id, enabled)
+      if (providerRoutingRequest.current === request) {
+        setProviderRouting(actual)
+        toast(`中国部署模型已${actual.enabled ? '开启' : '关闭'}`, 'ok')
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '提供商路由设置失败'
+      if (providerRoutingRequest.current === request) {
+        setProviderRoutingError(message)
+        toast(message, 'err')
+      }
+    } finally {
+      if (providerRoutingRequest.current === request) setProviderRoutingBusy(false)
     }
   }
 
@@ -165,6 +227,35 @@ export default function KeyDetail({ summary, onClose, onEdit, onDelete, onSetEna
           </dl>
 
           {summary.has_cookie && <div className="test-box"><div style={{display:'flex', alignItems:'center', justifyContent:'space-between'}}><div className="section-label" style={{margin:0}}>套餐与额度</div><button className="btn btn-sm" disabled={usageLoading} onClick={loadUsage}>{usageLoading ? '查询中…' : usage ? '刷新' : '查询额度'}</button></div>{usage && <><h3 style={{margin:'14px 0 4px'}}>{usage.plan_name}</h3><div className="small">状态 {usage.plan_status}{usage.region ? ` · ${usage.region}` : ''} · 余额 {money(usage.balance_microcents)}</div><div className="small" style={{marginTop:4}}>上次查询 {new Date(usage.fetched_at * 1000).toLocaleString()}</div><div className="usage-grid">{([['滚动额度', usage.rolling], ['每周额度', usage.weekly], ['每月额度', usage.monthly]] as const).map(([label,w]) => w && <div className="usage-card" key={label}><span className="small">{label}</span><strong>{w.remaining_percent.toFixed(1)}%</strong><div className="usage-track"><i style={{width:`${Math.max(0,Math.min(100,w.remaining_percent))}%`}} /></div><span className="small">剩余 · {Math.ceil(w.reset_in_sec/3600)} 小时后重置</span></div>)}</div>{usage.monthly_limit_microcents != null && <div className="small" style={{marginTop:10}}>月度消费 {money(usage.monthly_usage_microcents)} / {money(usage.monthly_limit_microcents)}</div>}</>}</div>}
+
+          <div className="test-box provider-routing-box">
+            <div className="provider-routing-row">
+              <div>
+                <div className="section-label" style={{ margin: 0 }}>提供商路由</div>
+                <strong>启用部署在中国的模型</strong>
+                <p className="small">直接读取并修改该 OpenCode 账号的实际设置。</p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-label="启用部署在中国的模型"
+                aria-checked={providerRouting?.enabled ?? false}
+                className={`provider-routing-switch ${providerRouting?.enabled ? 'on' : ''}`}
+                disabled={providerRoutingLoading || providerRoutingBusy || !providerRouting?.supported}
+                onClick={() => void toggleProviderRouting()}
+              >
+                <span />
+              </button>
+            </div>
+            <div className={`provider-routing-status ${providerRoutingError ? 'err' : ''}`}>
+              {providerRoutingLoading && '正在读取实际状态…'}
+              {!providerRoutingLoading && providerRouting?.supported && providerRouting.enabled != null && (
+                providerRoutingBusy ? '正在保存并校验…' : `实际状态：${providerRouting.enabled ? '已开启' : '已关闭'}`
+              )}
+              {!providerRoutingLoading && providerRouting && !providerRouting.supported && providerRouting.reason}
+              {!providerRoutingLoading && providerRoutingError && <>{providerRoutingError} <button type="button" onClick={() => void loadProviderRouting()}>重新读取</button></>}
+            </div>
+          </div>
 
           <div className="test-box">
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

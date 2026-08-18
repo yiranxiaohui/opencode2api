@@ -143,6 +143,19 @@ async fn query(
     workspace: &str,
     id: &str,
 ) -> Result<String, ApiError> {
+    match server_query(client, cookie, workspace, id, "查询额度").await {
+        Err(ApiError::Upstream(message)) => Err(ApiError::BadRequest(message)),
+        result => result,
+    }
+}
+
+async fn server_query(
+    client: &Client,
+    cookie: &str,
+    workspace: &str,
+    id: &str,
+    operation: &str,
+) -> Result<String, ApiError> {
     let args = format!(
         r#"{{"t":{{"t":9,"i":0,"l":1,"a":[{{"t":1,"s":"{workspace}"}}],"o":0}},"f":31,"m":[]}}"#
     );
@@ -161,10 +174,10 @@ async fn query(
         .timeout(Duration::from_secs(30))
         .send()
         .await
-        .map_err(|e| ApiError::BadRequest(format!("查询额度失败: {e}")))?;
+        .map_err(|e| ApiError::Upstream(format!("{operation}失败: {e}")))?;
     if !response.status().is_success() {
-        return Err(ApiError::BadRequest(format!(
-            "查询额度失败: HTTP {}",
+        return Err(ApiError::Upstream(format!(
+            "{operation}失败: HTTP {}",
             response.status()
         )));
     }
@@ -172,6 +185,275 @@ async fn query(
         .text()
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct ProviderRoutingServerFunctions {
+    query: Option<String>,
+    update: Option<String>,
+}
+
+impl ProviderRoutingServerFunctions {
+    fn record(&mut self, name: &str, id: &str) {
+        match name {
+            "lite.subscription.get" => self.query = Some(id.to_string()),
+            "go.providerRouting.set" => self.update = Some(id.to_string()),
+            _ => {}
+        }
+    }
+
+    fn merge(&mut self, other: Self) {
+        if other.query.is_some() {
+            self.query = other.query;
+        }
+        if other.update.is_some() {
+            self.update = other.update;
+        }
+    }
+
+    fn complete(&self) -> bool {
+        self.query.is_some() && self.update.is_some()
+    }
+}
+
+pub async fn provider_routing(
+    client: &Client,
+    cookie: &str,
+    workspace: &str,
+) -> Result<Option<bool>, ApiError> {
+    let functions = provider_routing_server_functions(client, cookie, workspace).await?;
+    let query_id = functions.query.ok_or_else(|| {
+        ApiError::Upstream("OpenCode 页面中未找到提供商路由查询接口，请稍后重试".into())
+    })?;
+    query_provider_routing(client, cookie, workspace, &query_id).await
+}
+
+pub async fn set_provider_routing(
+    client: &Client,
+    cookie: &str,
+    workspace: &str,
+    enabled: bool,
+) -> Result<bool, ApiError> {
+    let functions = provider_routing_server_functions(client, cookie, workspace).await?;
+    let query_id = functions.query.ok_or_else(|| {
+        ApiError::Upstream("OpenCode 页面中未找到提供商路由查询接口，请稍后重试".into())
+    })?;
+    let update_id = functions.update.ok_or_else(|| {
+        ApiError::Upstream("OpenCode 页面中未找到提供商路由更新接口，请稍后重试".into())
+    })?;
+    let current = query_provider_routing(client, cookie, workspace, &query_id)
+        .await?
+        .ok_or_else(|| ApiError::BadRequest("该账号当前没有可管理的 OpenCode Go 订阅".into()))?;
+    if current == enabled {
+        return Ok(current);
+    }
+
+    submit_provider_routing(client, cookie, workspace, &update_id, current).await?;
+    let actual = query_provider_routing(client, cookie, workspace, &query_id)
+        .await?
+        .ok_or_else(|| ApiError::Upstream("更新后无法读取 OpenCode 提供商路由状态".into()))?;
+    if actual != enabled {
+        return Err(ApiError::Upstream(
+            "OpenCode 未保存中国部署模型设置，请稍后重试".into(),
+        ));
+    }
+    Ok(actual)
+}
+
+async fn provider_routing_server_functions(
+    client: &Client,
+    cookie: &str,
+    workspace: &str,
+) -> Result<ProviderRoutingServerFunctions, ApiError> {
+    let go_url = format!("{ORIGIN}/workspace/{workspace}/go");
+    let response = get(client, &go_url, cookie).await?;
+    if !response.status().is_success() {
+        return Err(ApiError::Upstream(format!(
+            "读取 OpenCode Go 页面失败: HTTP {}",
+            response.status()
+        )));
+    }
+    let html = response
+        .text()
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    let mut functions = extract_provider_routing_server_functions(&html);
+
+    for asset_path in extract_javascript_assets(&html) {
+        if functions.complete() {
+            break;
+        }
+        let response = client
+            .get(format!("{ORIGIN}{asset_path}"))
+            .header(header::COOKIE, cookie)
+            .header(header::USER_AGENT, USER_AGENT)
+            .header(header::ACCEPT, "*/*")
+            .header(header::REFERER, &go_url)
+            .timeout(Duration::from_secs(30))
+            .send()
+            .await;
+        let Ok(response) = response else {
+            continue;
+        };
+        if !response.status().is_success() {
+            continue;
+        }
+        let Ok(bundle) = response.text().await else {
+            continue;
+        };
+        functions.merge(extract_provider_routing_server_functions(&bundle));
+    }
+
+    Ok(functions)
+}
+
+fn extract_provider_routing_server_functions(bundle: &str) -> ProviderRoutingServerFunctions {
+    let reference_pattern = Regex::new(
+        r#"([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(?:[A-Za-z_$][A-Za-z0-9_$]*\.)?createServerReference\(\s*[\"']([0-9a-fA-F]{64})[\"']"#,
+    )
+    .expect("valid server reference regex");
+    let mut functions = ProviderRoutingServerFunctions::default();
+
+    for capture in reference_pattern.captures_iter(bundle) {
+        let Some(variable) = capture.get(1).map(|value| value.as_str()) else {
+            continue;
+        };
+        let Some(id) = capture.get(2).map(|value| value.as_str()) else {
+            continue;
+        };
+        let usage_pattern = Regex::new(&format!(
+            r#"[A-Za-z_$][A-Za-z0-9_$.]*\s*\(\s*{}\s*,\s*[\"'](lite\.subscription\.get|go\.providerRouting\.set)[\"']"#,
+            regex::escape(variable)
+        ))
+        .expect("valid server reference usage regex");
+        if let Some(name) = usage_pattern
+            .captures(bundle)
+            .and_then(|usage| usage.get(1))
+        {
+            functions.record(name.as_str(), id);
+        }
+    }
+
+    functions
+}
+
+async fn query_provider_routing(
+    client: &Client,
+    cookie: &str,
+    workspace: &str,
+    query_id: &str,
+) -> Result<Option<bool>, ApiError> {
+    let body = server_query(client, cookie, workspace, query_id, "读取中国部署模型设置").await?;
+    parse_provider_routing(&body)
+}
+
+async fn submit_provider_routing(
+    client: &Client,
+    cookie: &str,
+    workspace: &str,
+    update_id: &str,
+    current: bool,
+) -> Result<(), ApiError> {
+    // OpenCode's form posts the current value; its server action flips the
+    // region membership. Sending the desired value would leave the setting in
+    // the opposite state.
+    let form = reqwest::multipart::Form::new()
+        .text("workspaceID", workspace.to_string())
+        .text("useChinaProviders", current.to_string());
+    let response = client
+        .post(format!("{ORIGIN}/_server"))
+        .header(header::COOKIE, cookie)
+        .header(header::USER_AGENT, USER_AGENT)
+        .header(header::ACCEPT, "*/*")
+        .header(header::ORIGIN, ORIGIN)
+        .header(
+            header::REFERER,
+            format!("{ORIGIN}/workspace/{workspace}/go"),
+        )
+        .header("x-server-id", update_id)
+        .header("x-server-instance", "server-fn:0")
+        .header("x-single-flight", "true")
+        .multipart(form)
+        .timeout(Duration::from_secs(30))
+        .send()
+        .await
+        .map_err(|e| ApiError::Upstream(format!("更新中国部署模型设置失败: {e}")))?;
+    if response.headers().contains_key(header::LOCATION) {
+        return Err(ApiError::BadRequest(
+            "Cookie 无效或已过期，无法更新中国部署模型设置".into(),
+        ));
+    }
+    if !response.status().is_success()
+        || response
+            .headers()
+            .get("x-error")
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.eq_ignore_ascii_case("true"))
+    {
+        return Err(ApiError::Upstream(format!(
+            "更新中国部署模型设置失败: HTTP {}",
+            response.status()
+        )));
+    }
+    Ok(())
+}
+
+fn parse_provider_routing(body: &str) -> Result<Option<bool>, ApiError> {
+    if let Some(regions) = string_list(body, "region") {
+        return Ok(Some(regions.iter().any(|region| region == "cn")));
+    }
+    if Regex::new(r"(?:=|:|\()\s*null(?:[,;}\)])")
+        .expect("valid null result regex")
+        .is_match(body)
+    {
+        return Ok(None);
+    }
+    Err(ApiError::Upstream(
+        "OpenCode 提供商路由响应格式已变化，暂时无法解析".into(),
+    ))
+}
+
+fn string_list(body: &str, field: &str) -> Option<Vec<String>> {
+    let field_pattern = Regex::new(&format!(
+        r#"(?:[\"']{}[\"']|\b{}\b)\s*:\s*"#,
+        regex::escape(field),
+        regex::escape(field)
+    ))
+    .ok()?;
+    let value_start = field_pattern.find(body)?.end();
+    let value = body[value_start..].trim_start();
+    let segment = if value.starts_with('[') {
+        bracketed(value)?
+    } else if let Some(reference) = Regex::new(r"^\$R\[(\d+)\]").ok()?.captures(value) {
+        let id = reference.get(1)?.as_str();
+        let inline = value[reference.get(0)?.end()..].trim_start();
+        if let Some(assigned) = inline.strip_prefix('=') {
+            bracketed(assigned.trim_start())?
+        } else {
+            let assignment = Regex::new(&format!(r"\$R\[{}\]\s*=\s*", regex::escape(id)))
+                .ok()?
+                .find(body)?;
+            bracketed(body[assignment.end()..].trim_start())?
+        }
+    } else if value.starts_with('"') || value.starts_with('\'') {
+        let quote = value.chars().next()?;
+        let end = value.get(1..)?.find(quote)? + 2;
+        value.get(..end)?
+    } else {
+        return None;
+    };
+    let quoted = Regex::new(r#"[\"']([^\"']+)[\"']"#).ok()?;
+    let values = quoted
+        .captures_iter(segment)
+        .filter_map(|capture| capture.get(1))
+        .map(|value| value.as_str().to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    (!values.is_empty()).then_some(values)
+}
+
+fn bracketed(value: &str) -> Option<&str> {
+    let end = value.find(']')?;
+    value.get(..=end)
 }
 
 fn number(body: &str, field: &str) -> Option<f64> {
@@ -743,6 +1025,49 @@ mod tests {
                 apply: Some(apply_id),
             }
         );
+    }
+
+    #[test]
+    fn extracts_provider_routing_server_function_ids_from_bundle() {
+        let query_id = "c".repeat(64);
+        let update_id = "d".repeat(64);
+        let bundle = format!(
+            r#"const queryRef=createServerReference("{query_id}");query(queryRef,"lite.subscription.get");const updateRef=runtime.createServerReference('{update_id}');action(updateRef,'go.providerRouting.set');"#
+        );
+
+        assert_eq!(
+            extract_provider_routing_server_functions(&bundle),
+            ProviderRoutingServerFunctions {
+                query: Some(query_id),
+                update: Some(update_id),
+            }
+        );
+    }
+
+    #[test]
+    fn reads_enabled_provider_routing_from_inline_region_list() {
+        assert_eq!(
+            parse_provider_routing(r#"{region:["us","eu","sg","cn"]}"#).unwrap(),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn reads_disabled_provider_routing_from_referenced_region_list() {
+        assert_eq!(
+            parse_provider_routing(r#"$R[8]=["us","eu","sg"];$R[1]={region:$R[8]}"#).unwrap(),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn treats_null_subscription_as_unsupported_provider_routing() {
+        assert_eq!(parse_provider_routing(r#"$R[0]=null;"#).unwrap(), None);
+    }
+
+    #[test]
+    fn rejects_unrecognized_provider_routing_response() {
+        assert!(parse_provider_routing(r#"{status:"ok"}"#).is_err());
     }
 
     #[test]

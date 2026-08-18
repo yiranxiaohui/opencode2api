@@ -12,7 +12,8 @@ use crate::middleware::ManagementAuth;
 use crate::models::{
     AccountUsage, CookieImportInput, InviteLinkResult, InviteRewardClaimResult,
     InviteRewardsResult, KeyEnabledInput, KeyInput, KeyRecord, KeySummary, ModelInfo,
-    OPENCODE_BASE_URL, OkResponse, TestResult, now_secs,
+    OPENCODE_BASE_URL, OkResponse, ProviderRoutingInput, ProviderRoutingStatus, TestResult,
+    now_secs,
 };
 use crate::state::AppState;
 
@@ -263,6 +264,70 @@ pub async fn usage(
         .ok_or_else(|| ApiError::NotFound("key not found".into()))?;
     let usage = crate::account_monitor::refresh_account_usage(&st, &row).await?;
     Ok(Json(usage))
+}
+
+pub async fn provider_routing(
+    State(st): State<AppState>,
+    _: ManagementAuth,
+    Path(id): Path<String>,
+) -> Result<Json<ProviderRoutingStatus>, ApiError> {
+    let row = st
+        .db
+        .get_key(&id)?
+        .ok_or_else(|| ApiError::NotFound("key not found".into()))?;
+    let (Some(cookie_enc), Some(workspace)) =
+        (row.cookie_enc.as_deref(), row.workspace_id.as_deref())
+    else {
+        return Ok(Json(ProviderRoutingStatus {
+            supported: false,
+            enabled: None,
+            reason: Some("仅通过 Cookie 导入的 OpenCode Go 账号支持此设置".into()),
+        }));
+    };
+    let cookie = st.decrypt_secret(cookie_enc).await?;
+    let client = st.client_for_key(&row).await?;
+    let enabled = crate::opencode_account::provider_routing(&client, &cookie, workspace).await?;
+    Ok(Json(match enabled {
+        Some(enabled) => ProviderRoutingStatus {
+            supported: true,
+            enabled: Some(enabled),
+            reason: None,
+        },
+        None => ProviderRoutingStatus {
+            supported: false,
+            enabled: None,
+            reason: Some("该账号当前没有可管理的 OpenCode Go 订阅".into()),
+        },
+    }))
+}
+
+pub async fn set_provider_routing(
+    State(st): State<AppState>,
+    _: ManagementAuth,
+    Path(id): Path<String>,
+    Json(input): Json<ProviderRoutingInput>,
+) -> Result<Json<ProviderRoutingStatus>, ApiError> {
+    let row = st
+        .db
+        .get_key(&id)?
+        .ok_or_else(|| ApiError::NotFound("key not found".into()))?;
+    let cookie_enc = row.cookie_enc.as_deref().ok_or_else(|| {
+        ApiError::BadRequest("仅通过 Cookie 导入的 OpenCode Go 账号支持此设置".into())
+    })?;
+    let workspace = row
+        .workspace_id
+        .as_deref()
+        .ok_or_else(|| ApiError::Internal("账号缺少 workspace".into()))?;
+    let cookie = st.decrypt_secret(cookie_enc).await?;
+    let client = st.client_for_key(&row).await?;
+    let enabled =
+        crate::opencode_account::set_provider_routing(&client, &cookie, workspace, input.enabled)
+            .await?;
+    Ok(Json(ProviderRoutingStatus {
+        supported: true,
+        enabled: Some(enabled),
+        reason: None,
+    }))
 }
 
 pub async fn get_invite_link(

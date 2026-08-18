@@ -149,6 +149,18 @@ pub struct KeyEnabledInput {
     pub enabled: bool,
 }
 
+#[derive(Debug, Serialize)]
+pub struct ProviderRoutingStatus {
+    pub supported: bool,
+    pub enabled: Option<bool>,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ProviderRoutingInput {
+    pub enabled: bool,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct CookieImportInput {
     pub cookie: String,

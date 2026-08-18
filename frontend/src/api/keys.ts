@@ -24,6 +24,7 @@ import type {
   ManagedModel,
   ProxyInput,
   ProxyRecord,
+  ProviderRoutingStatus,
   TestResult,
 } from './types'
 
@@ -53,6 +54,9 @@ export const keysApi = {
   import: (payload: unknown) => post<ImportResult>('/api/import', payload),
   importCookie: (input: CookieImportInput) => post<KeyRecord>('/api/keys/import-cookie', input),
   usage: (id: string) => get<AccountUsage>(`/api/keys/${id}/usage`),
+  providerRouting: (id: string) => get<ProviderRoutingStatus>(`/api/keys/${id}/provider-routing`),
+  setProviderRouting: (id: string, enabled: boolean) =>
+    put<ProviderRoutingStatus>(`/api/keys/${id}/provider-routing`, { enabled }),
   inviteLink: (id: string) => get<InviteLinkResult>(`/api/keys/${id}/invite-link`),
   inviteRewards: (id: string) => get<InviteRewardsResult>(`/api/keys/${id}/invite-rewards`),
   claimInviteReward: (id: string, rewardId: string) =>
