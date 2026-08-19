@@ -104,6 +104,8 @@ function logsQuery(params: LogQuery): string {
   if (params.key) qs.set('key', params.key)
   if (params.model) qs.set('model', params.model)
   if (params.status !== undefined) qs.set('status', String(params.status))
+  if (params.start !== undefined) qs.set('start', String(params.start))
+  if (params.end !== undefined) qs.set('end', String(params.end))
   if (params.limit !== undefined) qs.set('limit', String(params.limit))
   if (params.offset !== undefined) qs.set('offset', String(params.offset))
   const q = qs.toString()

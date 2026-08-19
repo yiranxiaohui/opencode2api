@@ -136,6 +136,8 @@ pub struct LogFilter {
     pub route_key_id: Option<String>,
     pub model: Option<String>,
     pub status: Option<i64>,
+    pub created_from: Option<i64>,
+    pub created_to: Option<i64>,
     pub limit: i64,
     pub offset: i64,
 }
@@ -1029,6 +1031,14 @@ fn build_log_where(f: &LogFilter) -> (String, Vec<Box<dyn rusqlite::ToSql>>) {
         conds.push("status = ?".into());
         vals.push(Box::new(status));
     }
+    if let Some(created_from) = f.created_from {
+        conds.push("created_at >= ?".into());
+        vals.push(Box::new(created_from));
+    }
+    if let Some(created_to) = f.created_to {
+        conds.push("created_at <= ?".into());
+        vals.push(Box::new(created_to));
+    }
     let where_sql = if conds.is_empty() {
         String::new()
     } else {
@@ -1076,7 +1086,7 @@ fn log_group_stats(
 
 #[cfg(test)]
 mod tests {
-    use super::{ClientKeyData, Db, KeyData};
+    use super::{ClientKeyData, Db, KeyData, LogFilter, RequestLogRow};
     use crate::models::AccountType;
 
     #[tokio::test]
@@ -1148,6 +1158,70 @@ mod tests {
         assert!(db.set_client_key_allowed_models("client", None).unwrap());
         let row = db.client_key_by_hash("hash").unwrap().unwrap();
         assert_eq!(row.allowed_models, None);
+
+        drop(db);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn request_logs_filter_by_time_and_paginate() {
+        let path = std::env::temp_dir().join(format!(
+            "opencode2api-log-filter-{}.db",
+            uuid::Uuid::new_v4()
+        ));
+        crate::migration::run(&path).await.unwrap();
+        let db = Db::open(&path).unwrap();
+        for (id, created_at) in [("old", 100), ("middle", 200), ("new", 300)] {
+            db.insert_request_log(&RequestLogRow {
+                id: id.into(),
+                created_at,
+                client_key_id: None,
+                client_key_name: "Client".into(),
+                route_key_id: None,
+                route_key_name: None,
+                method: "POST".into(),
+                path: "/v1/chat/completions".into(),
+                model: Some("test-model".into()),
+                stream: false,
+                status: 200,
+                latency_ms: created_at,
+                first_token_ms: None,
+                prompt_tokens: Some(10),
+                completion_tokens: Some(5),
+                cached_tokens: None,
+                cache_creation_tokens: None,
+                error: None,
+            })
+            .unwrap();
+        }
+
+        let filter = LogFilter {
+            created_from: Some(100),
+            created_to: Some(300),
+            limit: 1,
+            offset: 1,
+            ..LogFilter::default()
+        };
+        let (logs, total) = db.list_request_logs(&filter).unwrap();
+        assert_eq!(total, 3);
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].id, "middle");
+
+        let bounded_filter = LogFilter {
+            created_from: Some(200),
+            created_to: Some(300),
+            limit: 10,
+            ..LogFilter::default()
+        };
+        let (logs, total) = db.list_request_logs(&bounded_filter).unwrap();
+        assert_eq!(total, 2);
+        assert_eq!(
+            logs.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(),
+            vec!["new", "middle"]
+        );
+        let (totals, _, _) = db.log_stats(&bounded_filter).unwrap();
+        assert_eq!(totals.total_calls, 2);
+        assert_eq!(totals.total_prompt_tokens, 20);
 
         drop(db);
         std::fs::remove_file(path).unwrap();

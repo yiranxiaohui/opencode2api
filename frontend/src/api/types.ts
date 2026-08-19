@@ -201,6 +201,8 @@ export interface LogQuery {
   key?: string
   model?: string
   status?: number
+  start?: number
+  end?: number
   limit?: number
   offset?: number
 }

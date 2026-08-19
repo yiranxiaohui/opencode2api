@@ -18,12 +18,17 @@ interface Props {
 }
 
 const STATUS_CHOICES = [200, 400, 401, 404, 429, 500, 502, 503, 504]
+const PAGE_SIZE_CHOICES = [20, 50, 100, 200]
 
 export default function Logs({ keys, clientKeys }: Props) {
   const [client, setClient] = useState('')
   const [keyId, setKeyId] = useState('')
   const [model, setModel] = useState('')
   const [status, setStatus] = useState('')
+  const [startTime, setStartTime] = useState('')
+  const [endTime, setEndTime] = useState('')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(50)
   const [rows, setRows] = useState<RequestLog[]>([])
   const [total, setTotal] = useState(0)
   const [stats, setStats] = useState<LogStatsResponse | null>(null)
@@ -37,13 +42,27 @@ export default function Logs({ keys, clientKeys }: Props) {
     if (keyId) q.key = keyId
     if (model.trim()) q.model = model.trim()
     if (status) q.status = Number(status)
+    if (startTime) q.start = toUnixSeconds(startTime)
+    if (endTime) q.end = toUnixSeconds(endTime)
     return q
-  }, [client, keyId, model, status])
+  }, [client, keyId, model, status, startTime, endTime])
 
-  const load = async (q: LogQuery = filters) => {
+  const load = async (q: LogQuery = filters, targetPage = page, targetPageSize = pageSize) => {
+    if (q.start !== undefined && q.end !== undefined && q.start > q.end) {
+      setLoading(false)
+      setRows([])
+      setTotal(0)
+      setStats(null)
+      setErr('开始时间不能晚于结束时间')
+      return
+    }
     setLoading(true)
     try {
-      const res = await logsApi.list({ ...q, limit: 200 })
+      const res = await logsApi.list({
+        ...q,
+        limit: targetPageSize,
+        offset: (targetPage - 1) * targetPageSize,
+      })
       setRows(res.items)
       setTotal(res.total)
       setErr('')
@@ -63,38 +82,52 @@ export default function Logs({ keys, clientKeys }: Props) {
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client, keyId, model, status])
+  }, [filters, page, pageSize])
 
   useEffect(() => {
     if (paused) return
     const t = setInterval(() => load(), 5000)
     return () => clearInterval(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [paused, filters])
+  }, [paused, filters, page, pageSize])
 
   const clearAll = async () => {
     if (!window.confirm('清空全部请求日志？此操作不可撤销。')) return
     try {
       await logsApi.clear()
-      await load()
+      setPage(1)
+      await load(filters, 1)
       toast('请求日志已清空', 'ok')
     } catch (e) {
       toast(e instanceof Error ? e.message : '清空失败', 'err')
     }
   }
 
-  const activeCount = [client, keyId, model, status].filter(Boolean).length
+  const resetPage = () => setPage(1)
+  const clearFilters = () => {
+    setClient('')
+    setKeyId('')
+    setModel('')
+    setStatus('')
+    setStartTime('')
+    setEndTime('')
+    resetPage()
+  }
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  const rangeStart = total === 0 ? 0 : (page - 1) * pageSize + 1
+  const rangeEnd = Math.min(page * pageSize, total)
+  const activeCount = [client, keyId, model, status, startTime, endTime].filter(Boolean).length
 
   return (
     <div>
       <div className="toolbar" style={{ flexWrap: 'wrap' }}>
-        <select className="input log-filter" value={client} onChange={(e) => setClient(e.target.value)}>
+        <select className="input log-filter" value={client} onChange={(e) => { setClient(e.target.value); resetPage() }}>
           <option value="">全部访问密钥</option>
           {clientKeys.map((k) => (
             <option key={k.id} value={k.id}>{k.name}</option>
           ))}
         </select>
-        <select className="input log-filter" value={keyId} onChange={(e) => setKeyId(e.target.value)}>
+        <select className="input log-filter" value={keyId} onChange={(e) => { setKeyId(e.target.value); resetPage() }}>
           <option value="">全部账号</option>
           {keys.map((k) => (
             <option key={k.id} value={k.id}>{k.name}</option>
@@ -104,19 +137,41 @@ export default function Logs({ keys, clientKeys }: Props) {
           className="input log-filter"
           placeholder="模型关键字（deepseek…）"
           value={model}
-          onChange={(e) => setModel(e.target.value)}
+          onChange={(e) => { setModel(e.target.value); resetPage() }}
         />
-        <select className="input log-filter log-status" value={status} onChange={(e) => setStatus(e.target.value)}>
+        <select className="input log-filter log-status" value={status} onChange={(e) => { setStatus(e.target.value); resetPage() }}>
           <option value="">全部状态</option>
           {STATUS_CHOICES.map((s) => (
             <option key={s} value={s}>{s}</option>
           ))}
         </select>
+        <label className="log-time-filter">
+          <span>从</span>
+          <input
+            className="input"
+            type="datetime-local"
+            step="1"
+            value={startTime}
+            onChange={(e) => { setStartTime(e.target.value); resetPage() }}
+            aria-label="开始时间"
+          />
+        </label>
+        <label className="log-time-filter">
+          <span>至</span>
+          <input
+            className="input"
+            type="datetime-local"
+            step="1"
+            value={endTime}
+            onChange={(e) => { setEndTime(e.target.value); resetPage() }}
+            aria-label="结束时间"
+          />
+        </label>
 
         <div className="grow" />
 
         {activeCount > 0 && (
-          <button className="btn btn-ghost btn-sm" onClick={() => { setClient(''); setKeyId(''); setModel(''); setStatus('') }}>
+          <button className="btn btn-ghost btn-sm" onClick={clearFilters}>
             <XIcon size={13} /> 清除筛选{activeCount > 0 ? ` (${activeCount})` : ''}
           </button>
         )}
@@ -177,6 +232,30 @@ export default function Logs({ keys, clientKeys }: Props) {
             <span>令牌用量</span>
           </div>
           {rows.map((r) => <LogRow key={r.id} log={r} />)}
+        </div>
+      )}
+
+      {total > 0 && (
+        <div className="log-pagination">
+          <span className="small">第 {rangeStart}–{rangeEnd} 条，共 {total} 条</span>
+          <div className="grow" />
+          <label className="small log-page-size">
+            每页
+            <select
+              className="input"
+              value={pageSize}
+              onChange={(e) => { setPageSize(Number(e.target.value)); resetPage() }}
+            >
+              {PAGE_SIZE_CHOICES.map((size) => <option key={size} value={size}>{size}</option>)}
+            </select>
+          </label>
+          <button className="btn btn-sm" disabled={page <= 1 || loading} onClick={() => setPage((value) => value - 1)}>
+            上一页
+          </button>
+          <span className="small log-page-number">第 {page} / {totalPages} 页</span>
+          <button className="btn btn-sm" disabled={page >= totalPages || loading} onClick={() => setPage((value) => value + 1)}>
+            下一页
+          </button>
         </div>
       )}
     </div>
@@ -271,6 +350,10 @@ function tokenTitle(log: RequestLog) {
 
 function formatTime(seconds: number) {
   return new Date(seconds * 1000).toLocaleString()
+}
+
+function toUnixSeconds(value: string) {
+  return Math.floor(new Date(value).getTime() / 1000)
 }
 
 function StatTile({ label, value }: { label: string; value: string }) {

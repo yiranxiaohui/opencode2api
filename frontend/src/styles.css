@@ -741,6 +741,8 @@ select.input { appearance: none; }
 
 .log-filter { width: 168px; flex: none; }
 .log-filter.log-status { width: 128px; }
+.log-time-filter { display: inline-flex; align-items: center; gap: 6px; color: var(--faint); font-size: 11px; }
+.log-time-filter .input { width: 205px; }
 
 .log-head {
   display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
@@ -815,6 +817,14 @@ select.input { appearance: none; }
   white-space: pre-wrap;
 }
 
+.log-pagination {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 12px;
+}
+.log-page-size { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.log-page-size .input { width: 72px; padding: 5px 8px; }
+.log-page-number { min-width: 74px; text-align: center; white-space: nowrap; }
+
 /* ---------- Log stats ---------- */
 
 .log-stats {
@@ -877,6 +887,7 @@ select.input { appearance: none; }
   .client-key-model-button { grid-column: 1; grid-row: 3; }
   .client-key-usage { grid-column: 1; grid-row: 4; }
   .client-key-actions { grid-column: 2; grid-row: 1 / 5; flex-direction: column; align-items: stretch; }
+  .log-pagination { flex-wrap: wrap; }
 }
 
 @media (max-width: 680px) {

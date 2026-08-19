@@ -20,6 +20,8 @@ pub struct LogQuery {
     pub key: Option<String>,
     pub model: Option<String>,
     pub status: Option<i64>,
+    pub start: Option<i64>,
+    pub end: Option<i64>,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
 }
@@ -34,6 +36,8 @@ fn filter_from(q: LogQuery) -> LogFilter {
             .filter(|s| !s.trim().is_empty())
             .map(|s| s.trim().to_string()),
         status: q.status,
+        created_from: q.start,
+        created_to: q.end,
         limit: q.limit.unwrap_or(200).clamp(1, 500),
         offset: q.offset.unwrap_or(0).max(0),
     }
