@@ -325,6 +325,27 @@ pub struct ProxyInput {
     pub url: String,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[serde(rename_all = "lowercase")]
+pub enum ProxyTestKind {
+    Tcp,
+    Http,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ProxyTestInput {
+    pub kind: ProxyTestKind,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ProxyTestResult {
+    pub kind: ProxyTestKind,
+    pub ok: bool,
+    pub latency_ms: Option<i64>,
+    pub status: Option<u16>,
+    pub error: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ProxyRecord {
     pub id: String,

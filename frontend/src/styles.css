@@ -204,6 +204,9 @@ select.input { appearance: none; }
   cursor: pointer;
   transition: background 0.1s;
 }
+.proxy-row {
+  grid-template-columns: 14px minmax(0, 1.1fr) minmax(0, 1.4fr) minmax(0, 7rem) 6rem 17rem;
+}
 .key-row:last-child { border-bottom: none; }
 .key-row:hover { background: var(--panel-2); }
 .key-row.selected { background: var(--accent-soft); }
@@ -216,6 +219,7 @@ select.input { appearance: none; }
 .led.warn { background: var(--accent); box-shadow: 0 0 8px rgba(217,164,65,0.6); }
 
 .key-name { display: flex; align-items: center; gap: 8px; min-width: 0; font-weight: 600; font-size: 14px; }
+.proxy-row .key-name { align-items: flex-start; flex-direction: column; gap: 3px; }
 .key-name .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .key-name .default-badge {
   flex: none;
@@ -293,6 +297,13 @@ select.input { appearance: none; }
 
 .row-actions { display: flex; gap: 6px; opacity: 0; transition: opacity 0.12s; }
 .key-row:hover .row-actions, .key-row:focus-within .row-actions { opacity: 1; }
+.proxy-row .row-actions { opacity: 1; }
+.proxy-test-actions { align-items: center; justify-content: flex-end; flex-wrap: wrap; }
+.proxy-test-actions .btn { gap: 4px; padding-left: 7px; padding-right: 7px; }
+.proxy-test-status { color: var(--faint); font-family: var(--mono); font-size: 10px; font-weight: 500; }
+.proxy-test-status.ok { color: var(--ok); }
+.proxy-test-status.err { color: var(--err); }
+.proxy-test-status.running { color: var(--accent); }
 
 /* ---------- Detail drawer ---------- */
 
@@ -913,7 +924,9 @@ select.input { appearance: none; }
   .nav-item { padding: 7px 10px; }
   .sidebar-foot { margin-top: 0; padding-top: 0; border-top: none; flex-direction: row; margin-left: auto; }
   .key-row { grid-template-columns: 14px minmax(0,1fr) auto; }
+  .proxy-row { grid-template-columns: 14px minmax(0,1fr) auto; }
   .key-url, .key-usage { display: none; }
+  .proxy-row .tags, .proxy-row .meta-num { display: none; }
   .row-actions { opacity: 1; }
   .content { padding: 16px 14px 60px; }
   .client-key-create-form { align-items: stretch; flex-direction: column; }

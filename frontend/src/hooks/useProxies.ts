@@ -45,5 +45,10 @@ export function useProxies(enabled: boolean) {
     },
   })
 
-  return { query, createProxy, updateProxy, deleteProxy }
+  const testProxy = useMutation({
+    mutationFn: ({ id, kind }: { id: string; kind: Parameters<typeof proxiesApi.test>[1] }) =>
+      proxiesApi.test(id, kind),
+  })
+
+  return { query, createProxy, updateProxy, deleteProxy, testProxy }
 }

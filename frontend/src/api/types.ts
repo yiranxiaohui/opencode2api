@@ -135,6 +135,15 @@ export interface ProxyInput {
   url: string
 }
 
+export type ProxyTestKind = 'tcp' | 'http'
+export interface ProxyTestResult {
+  kind: ProxyTestKind
+  ok: boolean
+  latency_ms: number | null
+  status: number | null
+  error: string | null
+}
+
 export interface ImportResult {
   imported: number
   updated: number
