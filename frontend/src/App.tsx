@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { setUnauthorizedHandler } from './api/client'
-import type { ClientApiKey, KeyInput, KeyRecord, KeySummary, ProxyRecord } from './api/types'
+import type { ClientApiKey, KeyInput, KeyRecord, KeySummary, ProxyRecord, ProxyTestKind } from './api/types'
 import AuthScreen from './components/AuthScreen'
 import ImportExportBar from './components/ImportExportBar'
 import KeyDetail from './components/KeyDetail'
@@ -63,7 +63,7 @@ export default function App() {
   const { query, createKey, updateKey, deleteKey, setEnabled, testKey, importItems, importCookie } = useKeys(
     phase === 'logged_in',
   )
-  const { query: proxiesQuery, createProxy, updateProxy, deleteProxy } = useProxies(
+  const { query: proxiesQuery, createProxy, updateProxy, deleteProxy, testProxy } = useProxies(
     phase === 'logged_in',
   )
 
@@ -171,6 +171,7 @@ export default function App() {
           </div>
           <ProxyList
             proxies={proxies}
+            onTest={(id, kind: ProxyTestKind) => testProxy.mutateAsync({ id, kind })}
             onEdit={(p) => {
               setEditingProxy(p)
               setProxyFormOpen(true)

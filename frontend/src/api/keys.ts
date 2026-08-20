@@ -25,6 +25,8 @@ import type {
   ProxyInput,
   ProxyRecord,
   ProviderRoutingStatus,
+  ProxyTestKind,
+  ProxyTestResult,
   TestResult,
 } from './types'
 
@@ -76,6 +78,8 @@ export const proxiesApi = {
   create: (input: ProxyInput) => post<ProxyRecord>('/api/proxies', input),
   update: (id: string, input: ProxyInput) => put<ProxyRecord>(`/api/proxies/${id}`, input),
   remove: (id: string) => del<{ ok: boolean }>(`/api/proxies/${id}`),
+  test: (id: string, kind: ProxyTestKind) =>
+    post<ProxyTestResult>(`/api/proxies/${id}/test`, { kind }),
 }
 
 export const clientKeysApi = {

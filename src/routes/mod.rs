@@ -84,6 +84,7 @@ pub fn build_router(state: AppState) -> Router {
             "/proxies/{id}",
             put(proxies::update).delete(proxies::delete),
         )
+        .route("/proxies/{id}/test", post(proxies::test))
         .route("/export", get(import_export::export))
         .route("/import", post(import_export::import));
 
