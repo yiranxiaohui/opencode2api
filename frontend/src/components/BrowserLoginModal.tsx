@@ -12,6 +12,7 @@ interface Props {
 
 export default function BrowserLoginModal({ proxies, onClose, onImported }: Props) {
   const [name, setName] = useState('')
+  const [inviteLink, setInviteLink] = useState('')
   const [proxyId, setProxyId] = useState('')
   const [accountType, setAccountType] = useState<'normal' | 'go'>('normal')
   const [session, setSession] = useState<BrowserLoginSession | null>(null)
@@ -47,6 +48,7 @@ export default function BrowserLoginModal({ proxies, onClose, onImported }: Prop
     try {
       const next = await browserLoginApi.start({
         name: name.trim() || undefined,
+        invite_link: inviteLink.trim() || undefined,
         proxy_id: proxyId || null,
         account_type: accountType,
       })
@@ -125,6 +127,7 @@ export default function BrowserLoginModal({ proxies, onClose, onImported }: Prop
                 系统会在服务器的临时虚拟桌面中打开 Chromium。请在下一个窗口手动登录；进入 workspace 后会自动读取 Cookie 并导入。
               </p>
               <label className="field"><span>账号名称（可选）</span><input className="input" value={name} onChange={(event) => setName(event.target.value)} placeholder="自动使用账号邮箱或 workspace" /></label>
+              <label className="field"><span>邀请链接（可选）</span><input className="input" type="url" inputMode="url" value={inviteLink} onChange={(event) => setInviteLink(event.target.value)} placeholder="https://opencode.ai/go?ref=..." /></label>
               <label className="field"><span>账号类型</span><select className="input" value={accountType} onChange={(event) => setAccountType(event.target.value as 'normal' | 'go')}><option value="normal">普通账号</option><option value="go">Go 订阅账号</option></select></label>
               <label className="field"><span>绑定代理</span><select className="input" value={proxyId} onChange={(event) => setProxyId(event.target.value)}><option value="">直连</option>{proxies.map((proxy) => <option key={proxy.id} value={proxy.id}>{proxy.name}</option>)}</select><span className="hint">所选代理同时用于浏览器登录、Cookie 验证和账号后续请求；固定出口代理会保持同一 IP。</span></label>
               {error && <p className="browser-login-error" role="alert">{error}</p>}

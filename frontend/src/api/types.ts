@@ -56,7 +56,7 @@ export interface TestResult {
 }
 
 export interface CookieImportInput { cookie: string; name?: string; proxy_id?: string | null; account_type: 'normal' | 'go' }
-export interface BrowserLoginInput { name?: string; proxy_id?: string | null; account_type: 'normal' | 'go' }
+export interface BrowserLoginInput { name?: string; invite_link?: string; proxy_id?: string | null; account_type: 'normal' | 'go' }
 export interface BrowserLoginSession { id: string; expires_at: number }
 export interface BrowserLoginStatus { ready: boolean }
 export interface UsageWindow { usage_percent: number; remaining_percent: number; reset_in_sec: number; status: string }

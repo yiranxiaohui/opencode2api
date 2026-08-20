@@ -76,6 +76,8 @@ pub struct BrowserLoginInput {
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]
+    pub invite_link: Option<String>,
+    #[serde(default)]
     pub proxy_id: Option<String>,
     #[serde(default)]
     pub account_type: AccountType,
@@ -151,9 +153,10 @@ impl BrowserLoginManager {
         proxy_url: Option<Zeroizing<String>>,
         proxy_revision: Option<String>,
     ) -> Result<BrowserLoginStarted, ApiError> {
+        let target_url = browser_login_url(input.invite_link.as_deref())?;
         self.start_session(
             Some(input),
-            LOGIN_URL,
+            &target_url,
             None,
             proxy_url,
             proxy_revision,
@@ -741,6 +744,45 @@ fn dependency_error(name: &str, env_name: &str, error: std::io::Error) -> ApiErr
     ))
 }
 
+fn browser_login_url(invite_link: Option<&str>) -> Result<String, ApiError> {
+    let Some(invite_link) = invite_link.map(str::trim).filter(|link| !link.is_empty()) else {
+        return Ok(LOGIN_URL.to_string());
+    };
+    let url = reqwest::Url::parse(invite_link)
+        .map_err(|_| ApiError::BadRequest("邀请链接格式无效".into()))?;
+    let valid_origin = url.scheme() == "https"
+        && url.host_str() == Some("opencode.ai")
+        && url.port().is_none()
+        && url.username().is_empty()
+        && url.password().is_none();
+    if !valid_origin || url.path() != "/go" || url.fragment().is_some() {
+        return Err(ApiError::BadRequest(
+            "仅支持 https://opencode.ai/go?ref=... 格式的邀请链接".into(),
+        ));
+    }
+
+    let referrals = url
+        .query_pairs()
+        .filter(|(name, _)| name == "ref")
+        .map(|(_, value)| value.into_owned())
+        .collect::<Vec<_>>();
+    let [referral] = referrals.as_slice() else {
+        return Err(ApiError::BadRequest("邀请链接缺少有效的 ref 参数".into()));
+    };
+    if referral.is_empty()
+        || !referral
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-'))
+    {
+        return Err(ApiError::BadRequest("邀请链接的 ref 参数格式无效".into()));
+    }
+
+    let mut target = reqwest::Url::parse("https://opencode.ai/go")
+        .map_err(|error| ApiError::Internal(format!("创建邀请登录地址失败: {error}")))?;
+    target.query_pairs_mut().append_pair("ref", referral);
+    Ok(target.to_string())
+}
+
 fn go_subscription_url(workspace_id: &str) -> Result<String, ApiError> {
     if workspace_id.is_empty() || workspace_id.chars().any(char::is_control) {
         return Err(ApiError::BadRequest("workspace 格式无效".into()));
@@ -1200,6 +1242,41 @@ mod tests {
         assert!(!is_authenticated_page(
             "https://example.com/workspace/wrk_123"
         ));
+    }
+
+    #[test]
+    fn uses_login_page_without_an_invite_link() {
+        assert_eq!(browser_login_url(None).unwrap(), LOGIN_URL);
+        assert_eq!(browser_login_url(Some("  ")).unwrap(), LOGIN_URL);
+    }
+
+    #[test]
+    fn accepts_and_normalizes_opencode_invite_links() {
+        assert_eq!(
+            browser_login_url(Some(
+                "  https://opencode.ai/go?utm_source=test&ref=abc_123-XYZ  "
+            ))
+            .unwrap(),
+            "https://opencode.ai/go?ref=abc_123-XYZ"
+        );
+    }
+
+    #[test]
+    fn rejects_untrusted_or_malformed_invite_links() {
+        for link in [
+            "https://example.com/go?ref=abc",
+            "https://opencode.ai.example.com/go?ref=abc",
+            "http://opencode.ai/go?ref=abc",
+            "https://opencode.ai/auth?ref=abc",
+            "https://opencode.ai/go",
+            "https://opencode.ai/go?ref=abc%2Fdef",
+            "https://opencode.ai/go?ref=one&ref=two",
+        ] {
+            assert!(
+                matches!(browser_login_url(Some(link)), Err(ApiError::BadRequest(_))),
+                "accepted invalid invite link: {link}"
+            );
+        }
     }
 
     #[test]
