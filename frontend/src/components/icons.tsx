@@ -104,6 +104,14 @@ export const CopyIcon = ({ size, style, className }: IconProps) => (
   </svg>
 )
 
+export const PasteIcon = ({ size, style, className }: IconProps) => (
+  <svg {...base({ size, style, className })}>
+    <path d="M9 5H6.5A1.5 1.5 0 0 0 5 6.5v13A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5v-13A1.5 1.5 0 0 0 17.5 5H15" />
+    <rect x="9" y="3" width="6" height="4" rx="1" />
+    <path d="M12 10v7m-3-3 3 3 3-3" />
+  </svg>
+)
+
 export const CheckIcon = ({ size, style, className }: IconProps) => (
   <svg {...base({ size, style, className })}>
     <path d="m4.5 12.5 5 5 10-11" />

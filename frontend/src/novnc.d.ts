@@ -3,6 +3,7 @@ declare module '@novnc/novnc' {
     connect: Event
     disconnect: CustomEvent<{ clean: boolean }>
     securityfailure: CustomEvent<{ status: number; reason: string }>
+    clipboard: CustomEvent<{ text: string }>
   }
 
   export default class RFB {
@@ -15,6 +16,7 @@ declare module '@novnc/novnc' {
     compressionLevel: number
     addEventListener<K extends keyof RFBEventMap>(type: K, listener: (event: RFBEventMap[K]) => void): void
     clipboardPasteFrom(text: string): void
+    sendKey(keysym: number, code: string, down?: boolean): void
     disconnect(): void
     focus(): void
   }
